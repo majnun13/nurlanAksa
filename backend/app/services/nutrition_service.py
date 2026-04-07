@@ -1,0 +1,153 @@
+# ─────────────────────────────────────────────────────────────
+#  NutritionService – MacroVision AI model + Veritabanı
+#  Model: EfficientNet-B4, eğitilmiş yemek tanıma modeli
+# ─────────────────────────────────────────────────────────────
+
+import os
+import torch
+import timm
+from PIL import Image
+from torchvision import transforms
+from io import BytesIO
+from fastapi import HTTPException
+from ..core.database import get_pool
+
+# ── Dosya yolları (backend/ml_models/ altında) ────────────────
+BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+MODEL_PATH = os.path.join(BASE_DIR, "ml_models", "combined_best.pth")
+
+# ── Cihaz ─────────────────────────────────────────────────────
+DEVICE = "cuda" if torch.cuda.is_available() else "cpu"
+
+# ── Görsel dönüşümü (eğitimde IMAGE_SIZE = 288) ──────────────
+_transform = transforms.Compose([
+    transforms.Resize(int(288 * 1.15)),
+    transforms.CenterCrop(288),
+    transforms.ToTensor(),
+    transforms.Normalize(
+        [0.485, 0.456, 0.406],
+        [0.229, 0.224, 0.225]
+    )
+])
+
+# ── Lazy model loading (singleton) ────────────────────────────
+_model = None
+_classes = None
+
+def _load_model():
+    """Model'i ilk kullanımda yükler (lazy loading)."""
+    global _model, _classes
+
+    if _model is not None:
+        return
+
+    if not os.path.exists(MODEL_PATH):
+        raise HTTPException(
+            status_code=500,
+            detail=f"Model dosyası bulunamadı: {MODEL_PATH}"
+        )
+
+    checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
+    _classes = checkpoint["classes"]
+    num_classes = checkpoint["num_classes"]
+
+    _model = timm.create_model(
+        "efficientnet_b4",
+        pretrained=False,
+        num_classes=num_classes
+    )
+    _model.load_state_dict(checkpoint["model_state_dict"])
+    _model.to(DEVICE)
+    _model.eval()
+    print(f"✅ MacroVision model yüklendi ({num_classes} sınıf, cihaz: {DEVICE})")
+
+
+# ── Public API ────────────────────────────────────────────────
+
+def predict_food(image_bytes: bytes) -> dict:
+    """Fotoğraftan yemek tahmini yap."""
+    _load_model()
+
+    image = Image.open(BytesIO(image_bytes)).convert("RGB")
+    x = _transform(image).unsqueeze(0).to(DEVICE)
+
+    with torch.no_grad():
+        output = _model(x)
+        probs = torch.softmax(output, dim=1)
+        top_probs, top_idxs = torch.topk(probs, 5)
+
+    top5 = []
+    for i in range(5):
+        idx = top_idxs[0][i].item()
+        label = _classes[idx]
+        prob = top_probs[0][i].item() * 100
+        top5.append({"label": label, "confidence": round(prob, 2)})
+
+    return {
+        "predicted_food": top5[0]["label"],
+        "confidence": top5[0]["confidence"],
+        "top5": top5,
+    }
+
+
+async def get_nutrition_for_food(food_name: str, gram: float) -> dict | None:
+    """Yemek adı ve gram miktarına göre besin değerini veritabanından hesapla."""
+    pool = await get_pool()
+    row = await pool.fetchrow(
+        "SELECT protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items WHERE name = $1 LIMIT 1",
+        food_name.strip().lower()
+    )
+    
+    if not row:
+        return None
+
+    ratio = gram / 100.0
+
+    protein = row.get("protein_per_100g") or 0
+    carbs = row.get("carbs_per_100g") or 0
+    fat = row.get("fat_per_100g") or 0
+    calories = row.get("calories_per_100g") or 0
+
+    return {
+        "food_name": food_name,
+        "gram": gram,
+        "protein": round(float(protein) * ratio, 2),
+        "carbs": round(float(carbs) * ratio, 2),
+        "fat": round(float(fat) * ratio, 2),
+        "calories": round(float(calories) * ratio, 2),
+    }
+
+
+async def search_foods(query: str) -> list[dict]:
+    """Yemek adına göre veritabanında arama yap."""
+    pool = await get_pool()
+    query_lower = query.strip().lower()
+    
+    if not query_lower:
+        rows = await pool.fetch("SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items ORDER BY name")
+    else:
+        # LIKE kullanarak arama (başında veya sonunda geçebilir)
+        search_term = f"%{query_lower}%"
+        rows = await pool.fetch(
+            "SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items WHERE name ILIKE $1 ORDER BY name",
+            search_term
+        )
+
+    foods = []
+    for row in rows:
+        foods.append({
+            "name": row["name"],
+            "protein_per_100g": round(float(row["protein_per_100g"]), 2) if row["protein_per_100g"] else None,
+            "carbs_per_100g": round(float(row["carbs_per_100g"]), 2) if row["carbs_per_100g"] else None,
+            "fat_per_100g": round(float(row["fat_per_100g"]), 2) if row["fat_per_100g"] else None,
+            "calories_per_100g": round(float(row["calories_per_100g"]), 2) if row["calories_per_100g"] else None,
+        })
+
+    return foods
+
+
+async def get_all_food_names() -> list[str]:
+    """Tüm yemek isimlerini veritabanından listele."""
+    pool = await get_pool()
+    rows = await pool.fetch("SELECT name FROM food_items ORDER BY name")
+    return [r["name"] for r in rows]

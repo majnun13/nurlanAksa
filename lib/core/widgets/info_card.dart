@@ -1,15 +1,11 @@
+// Legacy stubs – kept for backwards-compatibility with any remaining imports.
+// The real implementations live in lib/core/widgets/aksa_widgets.dart
+
+export 'aksa_widgets.dart' show AksaCard, SectionTitle, MacroProgressRow;
+
+// InfoCard alias
 import 'package:flutter/material.dart';
+import 'aksa_widgets.dart';
 
-class InfoCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsets padding;
-
-  const InfoCard({super.key, required this.child, this.padding = const EdgeInsets.all(16)});
-
-  @override
-  Widget build(BuildContext context) {
-    return Card(
-      child: Padding(padding: padding, child: child),
-    );
-  }
-}
+// InfoCard is defined in aksa_widgets.dart already as a legacy alias.
+// This file just re-exports to satisfy any old import paths.

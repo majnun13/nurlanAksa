@@ -2,6 +2,7 @@
 *.class
 *.log
 *.pyc
+*.pyo
 *.swp
 .DS_Store
 .atom/
@@ -17,11 +18,6 @@ migrate_working_dir/
 *.ipr
 *.iws
 .idea/
-
-# The .vscode folder contains launch configuration and tasks you configure in
-# VS Code which you may wish to be included in version control, so this line
-# is commented out by default.
-#.vscode/
 
 # Flutter/Dart/Pub related
 **/doc/api/
@@ -43,3 +39,41 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# ==========================================
+# GÜVENLİK VE BACKEND (YAVUZ AKSA)
+# ==========================================
+
+# 1. Çevre Değişkenleri ve Sırlar (Şifreler)
+.env
+.env.*
+*.local
+credentials.json
+client_secret.json
+
+# 2. Python ve Backend Gereksinimleri
+**/__pycache__/
+**/*.pyc
+**/venv/
+**/env/
+**/.venv/
+pip-log.txt
+pytest_cache/
+
+# 3. Model Files (Yapay Zeka çok büyük ve private)
+**/ml_models/*.pth
+**/ml_models/*.pt
+**/ml_models/*.h5
+
+# 4. Veritabanı Dosyaları (Local kullanılıyorsa)
+*.sqlite
+*.sqlite3
+*.db
+database/*.sqlite
+
+# 5. Firebase / Mobil Güvenlik Dosyaları
+google-services.json
+GoogleService-Info.plist
+*.keystore
+*.jks
+key.properties

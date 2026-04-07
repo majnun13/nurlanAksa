@@ -1,21 +1,52 @@
 name: aksa
-description: "A new Flutter project."
+description: "AKSA – Akıllı Kişisel Sağlık Asistanı"
 publish_to: 'none'
 version: 1.0.0+1
 
 environment:
-  sdk: ^3.11.0
+  sdk: ^3.5.0
 
 dependencies:
   flutter:
     sdk: flutter
 
+  # UI
   cupertino_icons: ^1.0.8
-
-  # UI için eklediklerimiz
   google_fonts: ^6.2.1
   fl_chart: ^0.69.0
+  lottie: ^3.1.2
+  shimmer: ^3.0.0
+  percent_indicator: ^4.2.3
+
+  # Navigation
+  go_router: ^14.6.2
+
+  # State
+  flutter_bloc: ^8.1.6
+  equatable: ^2.0.5
+
+  # Database (direkt bağlantı – ilerleyen aşamada kaldırılacak)
+  postgres: ^3.5.3
+  crypto: ^3.0.3
+
+  # HTTP Client (FastAPI backend)
+  dio: ^5.8.0+1
+  shared_preferences: ^2.5.2
+
+  # Email
+  mailer: ^6.1.2
+  flutter_dotenv: ^5.2.1
+
+  # Utils
   intl: ^0.19.0
+  uuid: ^4.4.2
+
+  # Camera / Image
+  image_picker: ^1.1.2
+  cached_network_image: ^3.3.1
+
+  # Health (Google Fit & Apple HealthKit)
+  health: ^11.0.0
 
 dev_dependencies:
   flutter_test:
@@ -24,3 +55,7 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
+  assets:
+    - assets/images/
+    - assets/lottie/
+    - .env

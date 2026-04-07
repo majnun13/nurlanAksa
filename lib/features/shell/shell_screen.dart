@@ -4,6 +4,7 @@ import '../insights/insights_screen.dart';
 import '../nutrition/nutrition_screen.dart';
 import '../exercise/exercise_screen.dart';
 import '../settings/settings_screen.dart';
+import '../../app/theme.dart';
 
 class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
@@ -26,17 +27,51 @@ class _ShellScreenState extends State<ShellScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      body: SafeArea(child: _pages[_index]),
-      bottomNavigationBar: NavigationBar(
-        selectedIndex: _index,
-        onDestinationSelected: (v) => setState(() => _index = v),
-        destinations: const [
-          NavigationDestination(icon: Icon(Icons.dashboard_outlined), label: 'Özet'),
-          NavigationDestination(icon: Icon(Icons.show_chart_outlined), label: 'Detay'),
-          NavigationDestination(icon: Icon(Icons.restaurant_outlined), label: 'Beslenme'),
-          NavigationDestination(icon: Icon(Icons.fitness_center_outlined), label: 'Egzersiz'),
-          NavigationDestination(icon: Icon(Icons.settings_outlined), label: 'Ayarlar'),
-        ],
+      backgroundColor: AksaColors.bg,
+      body: IndexedStack(
+        index: _index,
+        children: _pages,
+      ),
+      bottomNavigationBar: Container(
+        decoration: BoxDecoration(
+          border: Border(
+            top: BorderSide(color: AksaColors.surfaceElevated, width: 1),
+          ),
+        ),
+        child: NavigationBar(
+          backgroundColor: AksaColors.surface,
+          height: 65,
+          selectedIndex: _index,
+          onDestinationSelected: (v) => setState(() => _index = v),
+          labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+          destinations: const [
+            NavigationDestination(
+              icon: Icon(Icons.dashboard_outlined),
+              selectedIcon: Icon(Icons.dashboard_rounded),
+              label: 'Özet',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.insights_outlined),
+              selectedIcon: Icon(Icons.insights_rounded),
+              label: 'Risk',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.restaurant_outlined),
+              selectedIcon: Icon(Icons.restaurant_rounded),
+              label: 'Beslenme',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.fitness_center_outlined),
+              selectedIcon: Icon(Icons.fitness_center_rounded),
+              label: 'Egzersiz',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.person_outline_rounded),
+              selectedIcon: Icon(Icons.person_rounded),
+              label: 'Profil',
+            ),
+          ],
+        ),
       ),
     );
   }
