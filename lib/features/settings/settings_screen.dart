@@ -8,15 +8,16 @@ import '../../data/repositories/auth_repository.dart';
 import '../auth/login_screen.dart';
 import 'legal_screens.dart';
 import 'edit_profile_screen.dart';
+import '../../core/network/api_client.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
 
   @override
-  State<SettingsScreen> createState() => _SettingsScreenState();
+  SettingsScreenState createState() => SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class SettingsScreenState extends State<SettingsScreen> {
   bool _notifications = true;
   bool _anomalyAlerts = true;
   bool _weeklyReport = false;
@@ -27,10 +28,17 @@ class _SettingsScreenState extends State<SettingsScreen> {
   HealthProfileModel? _profile;
   bool _isLoading = true;
 
+  String _userName = 'Kullanıcı';
+
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    ApiClient.getUserName().then((val) {
+      if (val != null && mounted) {
+        setState(() => _userName = val);
+      }
+    });
   }
 
   Future<void> _loadProfile() async {
@@ -47,6 +55,11 @@ class _SettingsScreenState extends State<SettingsScreen> {
         setState(() => _isLoading = false);
       }
     }
+  }
+
+  /// ShellScreen'den sekme değişikliğinde çağrılır
+  void refreshProfile() {
+    _loadProfile();
   }
 
   @override
@@ -210,7 +223,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   Widget _buildProfileCard(BuildContext context) {
     final p = _profile;
-    final name = p != null ? 'Kullanıcı' : 'Yükleniyor...';
+    final name = _userName;
     final ageStr = p?.age != null ? '${p!.age} yaş' : '-- yaş';
     final weightStr = p?.weightKg != null ? '${p!.weightKg!.toStringAsFixed(0)} kg' : '-- kg';
     final heightStr = p?.heightCm != null ? '${p!.heightCm!.toStringAsFixed(0)} cm' : '-- cm';
@@ -237,7 +250,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  p?.gender != null ? '${p!.gender}' : name,
+                  name,
                   style: const TextStyle(
                       color: Colors.white,
                       fontSize: 20,

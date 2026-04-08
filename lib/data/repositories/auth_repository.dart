@@ -29,7 +29,9 @@ class AuthRepository {
           'password': password,
         },
       );
-      return UserModel.fromJson(response.data['user'] as Map<String, dynamic>);
+      final user = UserModel.fromJson(response.data['user'] as Map<String, dynamic>);
+      await ApiClient.saveUserName(user.fullName);
+      return user;
     } on DioException catch (e) {
       throw Exception(ApiClient.extractError(e));
     }
@@ -51,7 +53,9 @@ class AuthRepository {
       );
       final token = response.data['access_token'] as String;
       await ApiClient.saveToken(token);
-      return UserModel.fromJson(response.data['user'] as Map<String, dynamic>);
+      final user = UserModel.fromJson(response.data['user'] as Map<String, dynamic>);
+      await ApiClient.saveUserName(user.fullName);
+      return user;
     } on DioException catch (e) {
       throw Exception(ApiClient.extractError(e));
     }
@@ -86,6 +90,7 @@ class AuthRepository {
       await ApiClient.saveToken(token);
 
       final user = UserModel.fromJson(response.data['user'] as Map<String, dynamic>);
+      await ApiClient.saveUserName(user.fullName);
       final isNew = response.data['is_new'] as bool? ?? false;
 
       return {'user': user, 'isNew': isNew};

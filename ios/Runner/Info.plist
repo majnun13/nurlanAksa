@@ -26,6 +26,16 @@
 	<string>$(FLUTTER_BUILD_NUMBER)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSHealthShareUsageDescription</key>
+	<string>We will sync your data with the Apple Health app to give you better insights</string>
+	<key>NSHealthUpdateUsageDescription</key>
+	<string>We will sync your data with the Apple Health app to give you better insights</string>
+    <key>NSCameraUsageDescription</key>
+    <string>Profil fotoğrafınızı çekmek veya uygulamanın bazı özelliklerini kullanmak için kameraya erişim gereklidir.</string>
+    <key>NSPhotoLibraryUsageDescription</key>
+    <string>Mevcut fotoğraflarınızdan profil resmi seçmek için fotoğraf galerinize erişim gereklidir.</string>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>Kamera kullanımı sırasında veya sesli işlemlerde mikrofon erişimine ihtiyaç duyulabilir.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

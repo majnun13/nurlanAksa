@@ -16,13 +16,36 @@ class ShellScreen extends StatefulWidget {
 class _ShellScreenState extends State<ShellScreen> {
   int _index = 0;
 
-  final _pages = const [
-    DashboardScreen(),
-    InsightsScreen(),
-    NutritionScreen(),
-    ExerciseScreen(),
-    SettingsScreen(),
-  ];
+  // NutritionScreen ve SettingsScreen'e erişim için GlobalKey
+  final _nutritionKey = GlobalKey<NutritionScreenState>();
+  final _settingsKey = GlobalKey<SettingsScreenState>();
+
+  late final List<Widget> _pages;
+
+  @override
+  void initState() {
+    super.initState();
+    _pages = [
+      const DashboardScreen(),
+      const InsightsScreen(),
+      NutritionScreen(key: _nutritionKey),
+      const ExerciseScreen(),
+      SettingsScreen(key: _settingsKey),
+    ];
+  }
+
+  void _onTabChanged(int newIndex) {
+    setState(() => _index = newIndex);
+
+    // Beslenme sekmesine her geçişte hedefleri yeniden yükle
+    if (newIndex == 2) {
+      _nutritionKey.currentState?.refreshTargets();
+    }
+    // Profil sekmesine her geçişte profili yeniden yükle
+    if (newIndex == 4) {
+      _settingsKey.currentState?.refreshProfile();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,7 +65,7 @@ class _ShellScreenState extends State<ShellScreen> {
           backgroundColor: AksaColors.surface,
           height: 65,
           selectedIndex: _index,
-          onDestinationSelected: (v) => setState(() => _index = v),
+          onDestinationSelected: _onTabChanged,
           labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
           destinations: const [
             NavigationDestination(

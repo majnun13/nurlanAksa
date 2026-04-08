@@ -1,5 +1,7 @@
-from fastapi import APIRouter
+from fastapi import APIRouter, Header, HTTPException
 from typing import List
+from app.core.database import get_pool
+from app.core.security import decode_access_token
 
 from app.schemas.dashboard import (
     DashboardResponse,
@@ -17,14 +19,24 @@ router = APIRouter(
 )
 
 @router.get("/summary", response_model=DashboardResponse)
-async def get_dashboard_summary():
+async def get_dashboard_summary(authorization: str = Header(...)):
     """
     Kullanıcının ana ekranında (Dashboard) gösterilecek tüm özet verileri döndürür.
-    Şu an için mock vari statik verilerle dönmektedir, ileride veritabanından çekilecektir.
+    Şu an için mock vari statik verilerle dönmektedir, ileride tam entegre olacaktır.
     """
-    
-    # Kullanıcı adını current_user sözlüğünden (token datasından) al (eğer yoksa 'Kullanıcı' de)
+    token = authorization.removeprefix("Bearer ").strip()
+    user_id = decode_access_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Geçersiz token.")
+
+    pool = await get_pool()
     user_name = "Kullanıcı"
+    
+    # Kullanıcı adını veritabanından öğren
+    row = await pool.fetchrow("SELECT full_name FROM users WHERE id = $1", user_id)
+    if row and row['full_name']:
+        full_name = row['full_name']
+        user_name = full_name.split()[0]  # Sadece ilk ismi al
 
     return DashboardResponse(
         user_name=user_name,

@@ -21,7 +21,8 @@ class ApiClient {
     if (Platform.isAndroid) {
       return 'http://10.0.2.2:8000';
     }
-    return 'http://localhost:8000';
+    // Gerçek iPhone cihazının Mac'teki sunucuya bağlanabilmesi için Mac'in Wi-Fi / Hotspot IP'si:
+    return 'http://192.168.1.101:8000';
   }
 
   static Dio? _dio;
@@ -62,6 +63,16 @@ class ApiClient {
   static Future<void> saveToken(String token) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_tokenKey, token);
+  }
+
+  static Future<void> saveUserName(String name) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('user_name', name);
+  }
+
+  static Future<String?> getUserName() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.getString('user_name');
   }
 
   static Future<void> clearToken() async {

@@ -8,6 +8,7 @@ from ...schemas.nutrition import (
     MealLogResponse,
 )
 from ...services import nutrition_service
+from ...services import nutrition_target_service
 from ...core.security import decode_access_token
 from ...core.database import get_pool
 
@@ -22,6 +23,17 @@ def _get_user_id(authorization: str) -> str:
     if not user_id:
         raise HTTPException(status_code=401, detail="Geçersiz token.")
     return user_id
+
+
+@router.get("/targets")
+async def get_nutrition_targets(authorization: str = Header(...)):
+    """
+    Kullanıcının sağlık profiline göre kişiselleştirilmiş
+    kalori ve makro hedeflerini döner (Mifflin-St Jeor formülü).
+    """
+    user_id = _get_user_id(authorization)
+    targets = await nutrition_target_service.get_user_nutrition_targets(user_id)
+    return targets
 
 
 @router.post("/predict", response_model=NutritionPredictResponse)

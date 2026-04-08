@@ -11,10 +11,10 @@ class NutritionScreen extends StatefulWidget {
   const NutritionScreen({super.key});
 
   @override
-  State<NutritionScreen> createState() => _NutritionScreenState();
+  NutritionScreenState createState() => NutritionScreenState();
 }
 
-class _NutritionScreenState extends State<NutritionScreen>
+class NutritionScreenState extends State<NutritionScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tab;
   final _nutritionRepo = NutritionRepository();
@@ -27,11 +27,39 @@ class _NutritionScreenState extends State<NutritionScreen>
   double _totalCarbs = 0;
   double _totalFat = 0;
 
+  // Kişiselleştirilmiş hedefler (backend'den gelecek)
+  double _calorieTarget = 2000;
+  double _proteinTarget = 100;
+  double _carbsTarget = 225;
+  double _fatTarget = 67;
+
   @override
   void initState() {
     super.initState();
     _tab = TabController(length: 2, vsync: this);
     _loadTodayMeals();
+    _loadNutritionTargets();
+  }
+
+  Future<void> _loadNutritionTargets() async {
+    try {
+      final targets = await _nutritionRepo.getNutritionTargets();
+      if (mounted) {
+        setState(() {
+          _calorieTarget = (targets['calorie_target'] as num).toDouble();
+          _proteinTarget = (targets['protein_target'] as num).toDouble();
+          _carbsTarget = (targets['carbs_target'] as num).toDouble();
+          _fatTarget = (targets['fat_target'] as num).toDouble();
+        });
+      }
+    } catch (_) {
+      // Backend erişilemezse mock varsayılanlar kalır
+    }
+  }
+
+  /// ShellScreen'den sekme değişikliğinde çağrılır
+  void refreshTargets() {
+    _loadNutritionTargets();
   }
 
   Future<void> _loadTodayMeals() async {
@@ -113,7 +141,7 @@ class _NutritionScreenState extends State<NutritionScreen>
   }
 
   Widget _buildDailySummaryTab() {
-    final calorieTarget = MockAksaData.caloriesTarget;
+    final calorieTarget = _calorieTarget;
     return ListView(
       padding: const EdgeInsets.only(bottom: 100),
       children: [
@@ -202,7 +230,7 @@ class _NutritionScreenState extends State<NutritionScreen>
                 MacroProgressRow(
                   label: 'Protein',
                   current: _totalProtein,
-                  target: MockAksaData.proteinTarget,
+                  target: _proteinTarget,
                   unit: 'g',
                   color: AksaColors.riskHigh,
                 ),
@@ -210,7 +238,7 @@ class _NutritionScreenState extends State<NutritionScreen>
                 MacroProgressRow(
                   label: 'Karbonhidrat',
                   current: _totalCarbs,
-                  target: MockAksaData.carbsTarget,
+                  target: _carbsTarget,
                   unit: 'g',
                   color: AksaColors.riskMedium,
                 ),
@@ -218,7 +246,7 @@ class _NutritionScreenState extends State<NutritionScreen>
                 MacroProgressRow(
                   label: 'Yağ',
                   current: _totalFat,
-                  target: MockAksaData.fatTarget,
+                  target: _fatTarget,
                   unit: 'g',
                   color: AksaColors.accent,
                 ),

@@ -86,4 +86,14 @@ class NutritionRepository {
       throw Exception(ApiClient.extractError(e));
     }
   }
+
+  /// Kişiselleştirilmiş kalori ve makro hedeflerini getir
+  Future<Map<String, dynamic>> getNutritionTargets() async {
+    try {
+      final response = await _dio.get('/nutrition/targets');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception(ApiClient.extractError(e));
+    }
+  }
 }
