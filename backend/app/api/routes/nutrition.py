@@ -9,8 +9,10 @@ from ...schemas.nutrition import (
 )
 from ...services import nutrition_service
 from ...services import nutrition_target_service
+from ...services import nutrition_report_service
 from ...core.security import decode_access_token
 from ...core.database import get_pool
+from datetime import date
 
 router = APIRouter(prefix="/nutrition", tags=["Nutrition"])
 
@@ -27,13 +29,39 @@ def _get_user_id(authorization: str) -> str:
 
 @router.get("/targets")
 async def get_nutrition_targets(authorization: str = Header(...)):
-    """
-    Kullanıcının sağlık profiline göre kişiselleştirilmiş
-    kalori ve makro hedeflerini döner (Mifflin-St Jeor formülü).
-    """
+    """Kişiselleştirilmiş kalori ve makro hedeflerini döner."""
     user_id = _get_user_id(authorization)
     targets = await nutrition_target_service.get_user_nutrition_targets(user_id)
     return targets
+
+
+@router.get("/meals/history")
+async def get_meals_history(
+    target_date: str,
+    authorization: str = Header(...),
+):
+    """Belirli bir güne ait tüm öğünleri döner. Format: YYYY-MM-DD"""
+    user_id = _get_user_id(authorization)
+    try:
+        d = date.fromisoformat(target_date)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Geçersiz tarih formatı. YYYY-MM-DD kullanın.")
+    meals = await nutrition_report_service.get_meals_by_date(user_id, d)
+    return meals
+
+
+@router.get("/report/weekly")
+async def get_weekly_report(authorization: str = Header(...)):
+    """Son 7 günün raporu + ortalamalar + akıllı öneriler."""
+    user_id = _get_user_id(authorization)
+    return await nutrition_report_service.get_weekly_report(user_id)
+
+
+@router.get("/report/monthly")
+async def get_monthly_report(authorization: str = Header(...)):
+    """Son 30 günün raporu + ortalamalar + akıllı öneriler."""
+    user_id = _get_user_id(authorization)
+    return await nutrition_report_service.get_monthly_report(user_id)
 
 
 @router.post("/predict", response_model=NutritionPredictResponse)

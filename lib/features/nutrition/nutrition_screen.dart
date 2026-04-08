@@ -6,6 +6,7 @@ import '../../core/widgets/aksa_widgets.dart';
 import '../../app/theme.dart';
 import '../../data/mock/mock_data.dart';
 import '../../data/repositories/nutrition_repository.dart';
+import 'nutrition_report_screen.dart';
 
 class NutritionScreen extends StatefulWidget {
   const NutritionScreen({super.key});
@@ -110,6 +111,15 @@ class NutritionScreenState extends State<NutritionScreen>
       appBar: AksaAppBar(
         title: 'Beslenme',
         subtitle: 'Gün özeti & öğün kaydı',
+        trailing: IconButton(
+          icon: const Icon(Icons.bar_chart_rounded, color: AksaColors.primary),
+          onPressed: () {
+            Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const NutritionReportScreen()),
+            );
+          },
+        ),
         bottom: TabBar(
           controller: _tab,
           labelColor: AksaColors.primaryLight,

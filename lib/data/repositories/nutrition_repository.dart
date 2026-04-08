@@ -96,4 +96,35 @@ class NutritionRepository {
       throw Exception(ApiClient.extractError(e));
     }
   }
+
+  /// Belirli bir güne ait öğünleri getir
+  Future<List<Map<String, dynamic>>> getMealsByDate(DateTime date) async {
+    try {
+      final dateStr = '${date.year}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+      final response = await _dio.get('/nutrition/meals/history', queryParameters: {'target_date': dateStr});
+      return List<Map<String, dynamic>>.from(response.data ?? []);
+    } on DioException catch (e) {
+      throw Exception(ApiClient.extractError(e));
+    }
+  }
+
+  /// Haftalık rapor getir
+  Future<Map<String, dynamic>> getWeeklyReport() async {
+    try {
+      final response = await _dio.get('/nutrition/report/weekly');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception(ApiClient.extractError(e));
+    }
+  }
+
+  /// Aylık rapor getir
+  Future<Map<String, dynamic>> getMonthlyReport() async {
+    try {
+      final response = await _dio.get('/nutrition/report/monthly');
+      return response.data as Map<String, dynamic>;
+    } on DioException catch (e) {
+      throw Exception(ApiClient.extractError(e));
+    }
+  }
 }
