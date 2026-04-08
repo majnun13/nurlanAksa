@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:dio/dio.dart';
 import 'package:google_sign_in/google_sign_in.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
@@ -10,6 +11,7 @@ class AuthRepository {
   static final _googleSignIn = GoogleSignIn(
     scopes: ['email', 'profile'],
     serverClientId: dotenv.env['GOOGLE_CLIENT_ID'],
+    clientId: Platform.isIOS ? dotenv.env['GOOGLE_IOS_CLIENT_ID'] : null,
   );
 
   // ── KAYIT ────────────────────────────────────────────────

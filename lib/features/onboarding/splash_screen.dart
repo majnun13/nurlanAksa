@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import '../../app/theme.dart';
 import '../auth/login_screen.dart';
 import '../shell/shell_screen.dart';
+import '../../core/network/api_client.dart';
 
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
@@ -37,18 +38,21 @@ class _SplashScreenState extends State<SplashScreen>
     );
 
     _ctrl.forward().then((_) {
-      Future.delayed(const Duration(milliseconds: 700), () {
-        if (mounted) {
-          // TODO: Check auth state from storage; for now go to login
-          Navigator.of(context).pushReplacement(
-            PageRouteBuilder(
-              pageBuilder: (_, __, ___) => const LoginScreen(),
-              transitionsBuilder: (_, anim, __, child) =>
-                  FadeTransition(opacity: anim, child: child),
-              transitionDuration: const Duration(milliseconds: 500),
-            ),
-          );
-        }
+      Future.delayed(const Duration(milliseconds: 700), () async {
+        if (!mounted) return;
+        
+        // Token kontrolü yap (otomatik giriş)
+        final String? token = await ApiClient.getToken();
+        
+        if (!mounted) return;
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => token != null ? const ShellScreen() : const LoginScreen(),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+            transitionDuration: const Duration(milliseconds: 500),
+          ),
+        );
       });
     });
   }
