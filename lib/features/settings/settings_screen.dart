@@ -4,7 +4,9 @@ import '../../core/widgets/aksa_widgets.dart';
 import '../../app/theme.dart';
 import '../../data/repositories/profile_repository.dart';
 import '../../data/models/health_profile_model.dart';
-import '../../core/network/api_client.dart';
+import '../../data/repositories/auth_repository.dart';
+import '../auth/login_screen.dart';
+import 'legal_screens.dart';
 import 'edit_profile_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -146,14 +148,14 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           icon: Icons.privacy_tip_outlined,
                           color: AksaColors.secondary,
                           title: 'Gizlilik & Veri',
-                          onTap: () {},
+                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const PrivacyScreen())),
                           showDivider: true,
                         ),
                         _MenuTile(
                           icon: Icons.security_outlined,
                           color: AksaColors.accent,
                           title: 'Güvenlik',
-                          onTap: () {},
+                          onTap: () => Navigator.push(context, MaterialPageRoute(builder: (_) => const SecurityScreen())),
                           showDivider: true,
                         ),
                         _MenuTile(
@@ -168,7 +170,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                           icon: Icons.logout_rounded,
                           color: AksaColors.riskMedium,
                           title: 'Çıkış Yap',
-                          onTap: () {},
+                          onTap: () => _showLogoutConfirm(context),
                           showDivider: false,
                         ),
                       ],
@@ -434,24 +436,78 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showDeleteConfirm(BuildContext context) {
+  Future<void> _logout() async {
+    await AuthRepository().logout();
+    if (!mounted) return;
+    Navigator.of(context).pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const LoginScreen()),
+      (route) => false,
+    );
+  }
+
+  void _showLogoutConfirm(BuildContext context) {
     showDialog(
       context: context,
-      builder: (_) => AlertDialog(
+      builder: (diagCtx) => AlertDialog(
         backgroundColor: AksaColors.surface,
-        title: const Text('Verileri Sil',
-            style: TextStyle(color: AksaColors.textPrimary)),
+        title: const Text('Çıkış Yap', style: TextStyle(color: AksaColors.textPrimary)),
         content: const Text(
-          'Tüm sağlık verileriniz kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+          'Oturumunuz sonlandırılacak. Çıkış yapmak istediğinize emin misiniz?',
           style: TextStyle(color: AksaColors.textSecondary),
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(diagCtx),
             child: const Text('İptal'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () {
+              Navigator.pop(diagCtx);
+              _logout();
+            },
+            style: FilledButton.styleFrom(backgroundColor: AksaColors.riskMedium),
+            child: const Text('Çıkış Yap'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showDeleteConfirm(BuildContext context) {
+    showDialog(
+      context: context,
+      builder: (diagCtx) => AlertDialog(
+        backgroundColor: AksaColors.surface,
+        title: const Text('Verileri Sil', style: TextStyle(color: AksaColors.textPrimary)),
+        content: const Text(
+          'Tüm sağlık verileriniz ve hesabınız kalıcı olarak silinecek. Bu işlem geri alınamaz.',
+          style: TextStyle(color: AksaColors.textSecondary),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(diagCtx),
+            child: const Text('İptal'),
+          ),
+          FilledButton(
+            onPressed: () async {
+              Navigator.pop(diagCtx); // Dialogu kapat
+              setState(() => _isLoading = true);
+              try {
+                await AuthRepository().deleteAccount();
+                if (!mounted) return;
+                Navigator.of(context).pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const LoginScreen()),
+                  (route) => false,
+                );
+              } catch (e) {
+                if (!mounted) return;
+                setState(() => _isLoading = false);
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(e.toString().replaceAll('Exception: ', '')),
+                  backgroundColor: AksaColors.riskHigh,
+                ));
+              }
+            },
             style: FilledButton.styleFrom(backgroundColor: AksaColors.riskHigh),
             child: const Text('Sil'),
           ),

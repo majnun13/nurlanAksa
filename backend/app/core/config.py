@@ -20,6 +20,9 @@ class Settings(BaseSettings):
     SMTP_EMAIL: str
     SMTP_PASSWORD: str
 
+    # Google OAuth
+    GOOGLE_CLIENT_ID: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

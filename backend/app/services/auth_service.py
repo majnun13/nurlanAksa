@@ -2,8 +2,13 @@ import random
 from fastapi import HTTPException, status
 from ..core.database import get_pool
 from ..core.security import hash_password, verify_password, create_access_token
+from ..core.config import settings
 from ..schemas.auth import UserResponse
 from .email_service import send_verification_email
+
+# Google token doğrulama
+from google.oauth2 import id_token as google_id_token
+from google.auth.transport import requests as google_requests
 
 
 # ── Yardımcı: asyncpg record → dict ──────────────────────────
@@ -157,3 +162,67 @@ def _to_user_response(user: dict) -> UserResponse:
         is_email_verified=user.get("is_email_verified", False),
         onboarding_done=user.get("onboarding_done", False),
     )
+
+async def delete_user(user_id: str) -> None:
+    pool = await get_pool()
+    # CASCADE tanimli oldugu icin users'dan silmek her seyi siler
+    await pool.execute("DELETE FROM users WHERE id = $1", user_id)
+
+
+async def google_login(id_token_str: str) -> tuple[str, UserResponse, bool]:
+    """
+    Google idToken'ı doğrular, kullanıcı yoksa otomatik oluşturur.
+    Döner: (jwt_token, user, is_new_user)
+    """
+    # 1) Google token doğrulama
+    try:
+        idinfo = google_id_token.verify_oauth2_token(
+            id_token_str,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+        )
+    except ValueError:
+        raise HTTPException(status_code=401, detail="Geçersiz Google token.")
+
+    email = idinfo.get("email", "").lower()
+    name = idinfo.get("name", "Google Kullanıcı")
+    google_uid = idinfo.get("sub")
+
+    if not email:
+        raise HTTPException(status_code=400, detail="Google hesabından e-posta alınamadı.")
+
+    pool = await get_pool()
+
+    # 2) Mevcut kullanıcıyı kontrol et
+    row = await pool.fetchrow(
+        "SELECT id, full_name, email, is_active, is_email_verified, onboarding_done FROM users WHERE email = $1",
+        email,
+    )
+
+    is_new = False
+
+    if row:
+        # Var olan kullanıcı
+        user = _row(row)
+        if not user["is_active"]:
+            raise HTTPException(status_code=403, detail="Hesabınız devre dışı.")
+        # oauth bilgilerini güncelle
+        await pool.execute(
+            "UPDATE users SET oauth_provider='google', oauth_uid=$2, is_email_verified=TRUE, last_login_at=NOW() WHERE id = $1",
+            user["id"], google_uid,
+        )
+    else:
+        # Yeni kullanıcı oluştur (şifresiz, email doğrulanmış)
+        row = await pool.fetchrow(
+            """
+            INSERT INTO users (full_name, email, password_hash, is_email_verified, oauth_provider, oauth_uid)
+            VALUES ($1, $2, $3, TRUE, 'google', $4)
+            RETURNING id, full_name, email, is_email_verified, onboarding_done
+            """,
+            name, email, "GOOGLE_OAUTH_NO_PASSWORD", google_uid,
+        )
+        user = _row(row)
+        is_new = True
+
+    token = create_access_token(str(user["id"]))
+    return token, _to_user_response(user), is_new

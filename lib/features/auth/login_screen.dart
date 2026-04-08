@@ -3,6 +3,7 @@ import '../../app/theme.dart';
 import '../../data/repositories/auth_repository.dart';
 import 'email_verification_screen.dart';
 import '../shell/shell_screen.dart';
+import '../onboarding/health_profile_screen.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -132,6 +133,43 @@ class _LoginScreenState extends State<LoginScreen>
         margin: const EdgeInsets.all(16),
       ),
     );
+  }
+
+  void _handleGoogleLogin() async {
+    setState(() => _loading = true);
+    try {
+      final result = await _authRepo.googleSignIn();
+      if (!mounted) return;
+
+      final bool isNew = result['isNew'] as bool;
+
+      if (isNew) {
+        // Yeni kullanıcı → Onboarding
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const HealthProfileScreen(),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+            transitionDuration: const Duration(milliseconds: 400),
+          ),
+        );
+      } else {
+        // Mevcut kullanıcı → Ana ekran
+        Navigator.of(context).pushReplacement(
+          PageRouteBuilder(
+            pageBuilder: (_, __, ___) => const ShellScreen(),
+            transitionsBuilder: (_, anim, __, child) =>
+                FadeTransition(opacity: anim, child: child),
+            transitionDuration: const Duration(milliseconds: 400),
+          ),
+        );
+      }
+    } on Exception catch (e) {
+      if (!mounted) return;
+      _showError(e.toString().replaceAll('Exception: ', ''));
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
@@ -469,13 +507,15 @@ class _LoginScreenState extends State<LoginScreen>
         _SocialButton(
           icon: 'G',
           label: 'Google ile Devam Et',
-          onTap: _handleLogin,
+          onTap: _handleGoogleLogin,
         ),
         const SizedBox(height: 12),
         _SocialButton(
           icon: '🍎',
           label: 'Apple ile Devam Et',
-          onTap: _handleLogin,
+          onTap: () {
+            _showError('Apple ile giriş yakında eklenecek.');
+          },
           isApple: true,
         ),
       ],

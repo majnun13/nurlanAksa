@@ -22,6 +22,10 @@ class ResendCodeRequest(BaseModel):
     user_id: str
 
 
+class GoogleLoginRequest(BaseModel):
+    id_token: str
+
+
 # ── Response şemaları ─────────────────────────────────────────
 class UserResponse(BaseModel):
     id: str
@@ -40,6 +44,13 @@ class LoginResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
     user: UserResponse
+
+
+class GoogleLoginResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    user: UserResponse
+    is_new: bool = False
 
 
 class MessageResponse(BaseModel):

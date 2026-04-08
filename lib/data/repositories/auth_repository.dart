@@ -1,16 +1,16 @@
-// ─────────────────────────────────────────────────────────────
-//  AuthRepository – FastAPI backend üzerinden auth işlemleri
-//
-//  Tüm HTTP çağrıları ApiClient.dio üzerinden yapılır.
-//  Hata mesajları API'nin `detail` alanından alınır.
-// ─────────────────────────────────────────────────────────────
-
 import 'package:dio/dio.dart';
+import 'package:google_sign_in/google_sign_in.dart';
+import 'package:flutter_dotenv/flutter_dotenv.dart';
 import '../../core/network/api_client.dart';
 import '../../data/models/user_model.dart';
 
 class AuthRepository {
   final _dio = ApiClient.dio;
+
+  static final _googleSignIn = GoogleSignIn(
+    scopes: ['email', 'profile'],
+    serverClientId: dotenv.env['GOOGLE_CLIENT_ID'],
+  );
 
   // ── KAYIT ────────────────────────────────────────────────
   /// Kullanıcı oluşturur ve doğrulama maili gönderir.
@@ -57,6 +57,43 @@ class AuthRepository {
     }
   }
 
+  // ── GOOGLE İLE GİRİŞ ─────────────────────────────────────
+  /// Google Sign-In akışını başlatır, id_token'ı backend'e gönderir.
+  /// Döner: ({user: UserModel, isNew: bool})
+  Future<Map<String, dynamic>> googleSignIn() async {
+    try {
+      // Önce mevcut oturumu temizle
+      await _googleSignIn.signOut();
+
+      final account = await _googleSignIn.signIn();
+      if (account == null) {
+        throw Exception('Google ile giriş iptal edildi.');
+      }
+
+      final auth = await account.authentication;
+      final idToken = auth.idToken;
+      if (idToken == null) {
+        throw Exception('Google token alınamadı.');
+      }
+
+      // Backend'e gönder
+      final response = await _dio.post(
+        '/auth/google',
+        data: {'id_token': idToken},
+      );
+
+      final token = response.data['access_token'] as String;
+      await ApiClient.saveToken(token);
+
+      final user = UserModel.fromJson(response.data['user'] as Map<String, dynamic>);
+      final isNew = response.data['is_new'] as bool? ?? false;
+
+      return {'user': user, 'isNew': isNew};
+    } on DioException catch (e) {
+      throw Exception(ApiClient.extractError(e));
+    }
+  }
+
   // ── E-POSTA DOĞRULAMA ─────────────────────────────────────
   /// E-posta doğrulandığında giriş yapmış sayılır ve token kaydedilir.
   Future<void> verifyCode({
@@ -93,6 +130,18 @@ class AuthRepository {
 
   // ── ÇIKIŞ ────────────────────────────────────────────────
   Future<void> logout() async {
+    await _googleSignIn.signOut();
     await ApiClient.clearToken();
+  }
+
+  // ── HESAP SİL ────────────────────────────────────────────
+  Future<void> deleteAccount() async {
+    try {
+      await _dio.delete('/auth/delete-account');
+      await _googleSignIn.signOut();
+      await ApiClient.clearToken();
+    } on DioException catch (e) {
+      throw Exception(ApiClient.extractError(e));
+    }
   }
 }
