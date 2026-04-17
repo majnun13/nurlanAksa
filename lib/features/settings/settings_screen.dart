@@ -84,6 +84,13 @@ class SettingsScreenState extends State<SettingsScreen> {
                   child: _buildProfileCard(context),
                 ),
 
+                // ── BMI Card
+                if (_profile != null && _profile!.weightKg != null && _profile!.heightCm != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                    child: _buildBMICard(context),
+                  ),
+
                 // ── Health Details
                 if (_profile != null) ...[
                   const SectionHeader('Sağlık Bilgileri',
@@ -443,6 +450,172 @@ class SettingsScreenState extends State<SettingsScreen> {
                 ),
               );
             }).toList(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildBMICard(BuildContext context) {
+    final w = _profile!.weightKg!;
+    final h = _profile!.heightCm!;
+    final bmi = w / ((h / 100) * (h / 100));
+    final bmiStr = bmi.toStringAsFixed(1);
+
+    String label;
+    Color color;
+    String emoji;
+    String advice;
+
+    if (bmi < 18.5) {
+      label = 'Zayıf';
+      color = AksaColors.riskMedium;
+      emoji = '⚠️';
+      advice = 'Kalori alımını artırmayı düşünebilirsiniz.';
+    } else if (bmi < 25) {
+      label = 'Normal';
+      color = AksaColors.riskLow;
+      emoji = '✅';
+      advice = 'Kilonuz ideal aralıkta, korumaya devam edin!';
+    } else if (bmi < 30) {
+      label = 'Fazla Kilolu';
+      color = AksaColors.riskMedium;
+      emoji = '⚡';
+      advice = 'Düzenli egzersiz ve dengeli beslenme önerilir.';
+    } else {
+      label = 'Obez';
+      color = AksaColors.riskHigh;
+      emoji = '🔴';
+      advice = 'Bir uzmana başvurarak sağlık planı oluşturun.';
+    }
+
+    // BMI bar pozisyonu (15-40 aralığı üzerinden)
+    final barProgress = ((bmi - 15) / 25).clamp(0.0, 1.0);
+
+    return AksaCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Header
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: const Icon(Icons.analytics_outlined, color: AksaColors.textSecondary, size: 18),
+              ),
+              const SizedBox(width: 10),
+              const Text('Vücut Kitle İndeksi (VKİ)',
+                  style: TextStyle(color: AksaColors.textPrimary, fontWeight: FontWeight.w600, fontSize: 14)),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Büyük değer ve durum
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              Text(bmiStr,
+                  style: TextStyle(color: color, fontSize: 42, fontWeight: FontWeight.w900, height: 1)),
+              const SizedBox(width: 8),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Text('kg/m²',
+                    style: TextStyle(color: color.withOpacity(0.6), fontSize: 14, fontWeight: FontWeight.w500)),
+              ),
+              const Spacer(),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.12),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: color.withOpacity(0.3)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(emoji, style: const TextStyle(fontSize: 14)),
+                    const SizedBox(width: 4),
+                    Text(label, style: TextStyle(color: color, fontWeight: FontWeight.w700, fontSize: 13)),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Progress bar
+          Stack(
+            children: [
+              // Background gradient bar
+              Container(
+                height: 10,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(5),
+                  gradient: const LinearGradient(
+                    colors: [
+                      Color(0xFF3B82F6), // Zayıf
+                      Color(0xFF22C55E), // Normal
+                      Color(0xFFF59E0B), // Fazla Kilolu
+                      Color(0xFFEF4444), // Obez
+                    ],
+                    stops: [0.0, 0.38, 0.6, 1.0],
+                  ),
+                ),
+              ),
+              // Indicator
+              Positioned(
+                left: (MediaQuery.of(context).size.width - 64 - 32) * barProgress, // 64=padding, 32=insets
+                top: -3,
+                child: Container(
+                  width: 16,
+                  height: 16,
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    shape: BoxShape.circle,
+                    border: Border.all(color: color, width: 3),
+                    boxShadow: [
+                      BoxShadow(color: color.withOpacity(0.4), blurRadius: 6, offset: const Offset(0, 2)),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 6),
+          // Range labels
+          const Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('15', style: TextStyle(color: AksaColors.textMuted, fontSize: 10)),
+              Text('18.5', style: TextStyle(color: AksaColors.textMuted, fontSize: 10)),
+              Text('25', style: TextStyle(color: AksaColors.textMuted, fontSize: 10)),
+              Text('30', style: TextStyle(color: AksaColors.textMuted, fontSize: 10)),
+              Text('40', style: TextStyle(color: AksaColors.textMuted, fontSize: 10)),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Öneri
+          Container(
+            padding: const EdgeInsets.all(10),
+            decoration: BoxDecoration(
+              color: color.withOpacity(0.06),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.lightbulb_outline, color: color, size: 16),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(advice,
+                      style: const TextStyle(color: AksaColors.textSecondary, fontSize: 12, height: 1.3)),
+                ),
+              ],
+            ),
           ),
         ],
       ),

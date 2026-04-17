@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
+import 'package:flutter/cupertino.dart';
 import '../../app/theme.dart';
 import '../../core/widgets/aksa_app_bar.dart';
 import '../../data/repositories/profile_repository.dart';
@@ -13,10 +13,12 @@ class HealthProfileScreen extends StatefulWidget {
 }
 
 class _HealthProfileScreenState extends State<HealthProfileScreen> {
-  // Form controllers
-  final _weightCtrl = TextEditingController(text: '78');
-  final _heightCtrl = TextEditingController(text: '178');
-  final _ageCtrl = TextEditingController(text: '27');
+  // Picker değerleri
+  int _selectedAge = 27;
+  int _selectedHeight = 178;
+  int _selectedWeightWhole = 78;
+  int _selectedWeightDecimal = 0;
+
   final _medicationCtrl = TextEditingController();
 
   String _selectedGender = 'Erkek';
@@ -44,22 +46,18 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
     'Tiroid',
   ];
 
+  // Picker aralıkları
+  static const _minAge = 10;
+  static const _maxAge = 100;
+  static const _minHeight = 100;
+  static const _maxHeight = 220;
+  static const _minWeight = 30;
+  static const _maxWeight = 200;
+
   int _step = 0;
   bool _loading = false;
   final _pageCtrl = PageController();
   final _profileRepo = ProfileRepository();
-
-  @override
-  void initState() {
-    super.initState();
-    // VKİ anında güncellenmesi için listener'lar
-    _weightCtrl.addListener(_onBMIFieldChanged);
-    _heightCtrl.addListener(_onBMIFieldChanged);
-  }
-
-  void _onBMIFieldChanged() {
-    setState(() {}); // VKİ widget'ını rebuild eder
-  }
 
   void _nextStep() async {
     if (_step < 2) {
@@ -74,10 +72,11 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
       setState(() => _loading = true);
       try {
         final allConditions = [..._selectedConditions, ..._customConditions];
+        final weightKg = _selectedWeightWhole + (_selectedWeightDecimal / 10);
         await _profileRepo.saveHealthProfile(
-          age: int.tryParse(_ageCtrl.text),
-          weightKg: double.tryParse(_weightCtrl.text),
-          heightCm: double.tryParse(_heightCtrl.text),
+          age: _selectedAge,
+          weightKg: weightKg,
+          heightCm: _selectedHeight.toDouble(),
           gender: _selectedGender,
           lifestyle: _selectedLifestyle,
           dietaryRestrictions: _selectedDiet,
@@ -124,14 +123,294 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
 
   @override
   void dispose() {
-    _weightCtrl.removeListener(_onBMIFieldChanged);
-    _heightCtrl.removeListener(_onBMIFieldChanged);
-    _weightCtrl.dispose();
-    _heightCtrl.dispose();
-    _ageCtrl.dispose();
     _medicationCtrl.dispose();
     _pageCtrl.dispose();
     super.dispose();
+  }
+
+  // ── Picker Bottom Sheet ──
+  void _showPickerSheet({
+    required String title,
+    required int min,
+    required int max,
+    required int current,
+    required String unit,
+    required ValueChanged<int> onChanged,
+  }) {
+    int tempValue = current;
+    final items = List.generate(max - min + 1, (i) => min + i);
+    final initialIndex = items.indexOf(current).clamp(0, items.length - 1);
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AksaColors.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AksaColors.textMuted.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('İptal', style: TextStyle(color: AksaColors.textMuted, fontSize: 16)),
+                  ),
+                  Text(title, style: const TextStyle(color: AksaColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 17)),
+                  TextButton(
+                    onPressed: () {
+                      onChanged(tempValue);
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('Tamam', style: TextStyle(color: AksaColors.primary, fontWeight: FontWeight.w700, fontSize: 16)),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 220,
+              child: CupertinoPicker(
+                scrollController: FixedExtentScrollController(initialItem: initialIndex),
+                magnification: 1.2,
+                squeeze: 1.1,
+                useMagnifier: true,
+                itemExtent: 44,
+                selectionOverlay: Container(
+                  decoration: BoxDecoration(
+                    border: Border.symmetric(
+                      horizontal: BorderSide(color: AksaColors.primary.withOpacity(0.3), width: 1),
+                    ),
+                  ),
+                ),
+                onSelectedItemChanged: (index) {
+                  tempValue = items[index];
+                },
+                children: items.map((val) => Center(
+                  child: Text(
+                    '$val $unit',
+                    style: const TextStyle(color: AksaColors.textPrimary, fontSize: 20, fontWeight: FontWeight.w500),
+                  ),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showWeightPickerSheet() {
+    // 30.0 ~ 200.0 arasında 0.1 adımlarla tüm değerleri üret
+    final allWeights = List.generate(
+      (_maxWeight - _minWeight) * 10 + 1,
+      (i) => _minWeight + (i / 10),
+    );
+    final currentWeight = _selectedWeightWhole + (_selectedWeightDecimal / 10);
+    int initialIndex = allWeights.indexWhere((w) => (w - currentWeight).abs() < 0.05);
+    if (initialIndex < 0) initialIndex = 0;
+    double tempWeight = currentWeight;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AksaColors.surfaceCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              margin: const EdgeInsets.only(top: 12),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: AksaColors.textMuted.withOpacity(0.3),
+                borderRadius: BorderRadius.circular(2),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  TextButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('İptal', style: TextStyle(color: AksaColors.textMuted, fontSize: 16)),
+                  ),
+                  const Text('Kilo', style: TextStyle(color: AksaColors.textPrimary, fontWeight: FontWeight.w700, fontSize: 17)),
+                  TextButton(
+                    onPressed: () {
+                      setState(() {
+                        _selectedWeightWhole = tempWeight.floor();
+                        _selectedWeightDecimal = ((tempWeight - tempWeight.floor()) * 10).round();
+                      });
+                      Navigator.pop(ctx);
+                    },
+                    child: const Text('Tamam', style: TextStyle(color: AksaColors.primary, fontWeight: FontWeight.w700, fontSize: 16)),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 220,
+              child: CupertinoPicker(
+                scrollController: FixedExtentScrollController(initialItem: initialIndex),
+                magnification: 1.22,
+                squeeze: 1.0,
+                useMagnifier: true,
+                itemExtent: 48,
+                selectionOverlay: Container(
+                  decoration: BoxDecoration(
+                    border: Border.symmetric(
+                      horizontal: BorderSide(color: AksaColors.primary.withOpacity(0.3), width: 1),
+                    ),
+                  ),
+                ),
+                onSelectedItemChanged: (index) {
+                  tempWeight = allWeights[index];
+                },
+                children: allWeights.map((val) => Center(
+                  child: Text(
+                    '${val.toStringAsFixed(1)} kg',
+                    style: const TextStyle(color: AksaColors.textPrimary, fontSize: 22, fontWeight: FontWeight.w500),
+                  ),
+                )).toList(),
+              ),
+            ),
+            const SizedBox(height: 16),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Picker Tile Widget ──
+  Widget _buildPickerTile({
+    required String label,
+    required String value,
+    required String unit,
+    required IconData icon,
+    required Color color,
+    required VoidCallback onTap,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 200),
+        padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 10),
+        decoration: BoxDecoration(
+          color: AksaColors.surfaceElevated,
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: color.withOpacity(0.3), width: 1.5),
+        ),
+        child: Column(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.12),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: color, size: 20),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              value,
+              style: const TextStyle(
+                color: AksaColors.textPrimary,
+                fontSize: 26,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              unit,
+              style: const TextStyle(color: AksaColors.textMuted, fontSize: 13),
+            ),
+            const SizedBox(height: 6),
+            Text(
+              label,
+              style: const TextStyle(color: AksaColors.textSecondary, fontSize: 12, fontWeight: FontWeight.w500),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.touch_app_outlined, color: color, size: 12),
+                  const SizedBox(width: 4),
+                  Text('Seç', style: TextStyle(color: color, fontSize: 11, fontWeight: FontWeight.w600)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── BMI hesaplama ──
+  Widget _buildBMICard() {
+    final h = _selectedHeight.toDouble();
+    final w = _selectedWeightWhole + (_selectedWeightDecimal / 10);
+    final bmi = w / ((h / 100) * (h / 100));
+    final bmiStr = bmi.toStringAsFixed(1);
+    final label = bmi < 18.5
+        ? 'Zayıf'
+        : bmi < 25
+            ? 'Normal'
+            : bmi < 30
+                ? 'Fazla Kilolu'
+                : 'Obez';
+    final color = bmi < 18.5
+        ? AksaColors.riskMedium
+        : bmi < 25
+            ? AksaColors.riskLow
+            : bmi < 30
+                ? AksaColors.riskMedium
+                : AksaColors.riskHigh;
+
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: color.withOpacity(0.08),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: color.withOpacity(0.2)),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.analytics_outlined, size: 18, color: AksaColors.textMuted),
+          const SizedBox(width: 10),
+          const Text('VKİ (BMI): ',
+              style: TextStyle(color: AksaColors.textSecondary, fontSize: 13)),
+          Text(bmiStr,
+              style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 15)),
+          const SizedBox(width: 6),
+          Text('• $label',
+              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w500)),
+        ],
+      ),
+    );
   }
 
   @override
@@ -236,40 +515,49 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
             color: AksaColors.primary,
             child: Column(
               children: [
-                // Age
-                _ProfileField(
-                  label: 'Yaş',
-                  controller: _ageCtrl,
-                  unit: 'yıl',
-                  keyboardType: TextInputType.number,
-                  inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                  icon: Icons.cake_outlined,
-                ),
-                const SizedBox(height: 16),
+                // Yaş / Boy / Kilo picker tile'ları
                 Row(
                   children: [
-                    // Height
-                    Expanded(
-                      child: _ProfileField(
-                        label: 'Boy',
-                        controller: _heightCtrl,
+                    Expanded(child: _buildPickerTile(
+                      label: 'Yaş',
+                      value: '$_selectedAge',
+                      unit: 'yıl',
+                      icon: Icons.cake_outlined,
+                      color: AksaColors.primary,
+                      onTap: () => _showPickerSheet(
+                        title: 'Yaş',
+                        min: _minAge,
+                        max: _maxAge,
+                        current: _selectedAge,
+                        unit: 'yıl',
+                        onChanged: (v) => setState(() => _selectedAge = v),
+                      ),
+                    )),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildPickerTile(
+                      label: 'Boy',
+                      value: '$_selectedHeight',
+                      unit: 'cm',
+                      icon: Icons.height_rounded,
+                      color: AksaColors.accent,
+                      onTap: () => _showPickerSheet(
+                        title: 'Boy',
+                        min: _minHeight,
+                        max: _maxHeight,
+                        current: _selectedHeight,
                         unit: 'cm',
-                        keyboardType: TextInputType.number,
-                        inputFormatters: [FilteringTextInputFormatter.digitsOnly],
-                        icon: Icons.height_rounded,
+                        onChanged: (v) => setState(() => _selectedHeight = v),
                       ),
-                    ),
-                    const SizedBox(width: 12),
-                    // Weight
-                    Expanded(
-                      child: _ProfileField(
-                        label: 'Kilo',
-                        controller: _weightCtrl,
-                        unit: 'kg',
-                        keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                        icon: Icons.monitor_weight_outlined,
-                      ),
-                    ),
+                    )),
+                    const SizedBox(width: 10),
+                    Expanded(child: _buildPickerTile(
+                      label: 'Kilo',
+                      value: '$_selectedWeightWhole.$_selectedWeightDecimal',
+                      unit: 'kg',
+                      icon: Icons.monitor_weight_outlined,
+                      color: AksaColors.secondary,
+                      onTap: () => _showWeightPickerSheet(),
+                    )),
                   ],
                 ),
                 const SizedBox(height: 16),
@@ -323,49 +611,6 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
               }).toList(),
             ),
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildBMICard() {
-    final h = double.tryParse(_heightCtrl.text) ?? 178;
-    final w = double.tryParse(_weightCtrl.text) ?? 78;
-    final bmi = w / ((h / 100) * (h / 100));
-    final bmiStr = bmi.toStringAsFixed(1);
-    final label = bmi < 18.5
-        ? 'Zayıf'
-        : bmi < 25
-            ? 'Normal'
-            : bmi < 30
-                ? 'Fazla Kilolu'
-                : 'Obez';
-    final color = bmi < 18.5
-        ? AksaColors.riskMedium
-        : bmi < 25
-            ? AksaColors.riskLow
-            : bmi < 30
-                ? AksaColors.riskMedium
-                : AksaColors.riskHigh;
-
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(
-        color: color.withOpacity(0.08),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: color.withOpacity(0.2)),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.analytics_outlined, size: 18, color: AksaColors.textMuted),
-          const SizedBox(width: 10),
-          Text('VKİ (BMI): ',
-              style: const TextStyle(color: AksaColors.textSecondary, fontSize: 13)),
-          Text(bmiStr,
-              style: TextStyle(color: color, fontWeight: FontWeight.w800, fontSize: 15)),
-          const SizedBox(width: 6),
-          Text('• $label',
-              style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.w500)),
         ],
       ),
     );
@@ -800,52 +1045,6 @@ class _HealthProfileScreenState extends State<HealthProfileScreen> {
           ),
         ),
       ),
-    );
-  }
-}
-
-// ── Profile number field
-class _ProfileField extends StatelessWidget {
-  const _ProfileField({
-    required this.label,
-    required this.controller,
-    required this.unit,
-    required this.icon,
-    this.keyboardType,
-    this.inputFormatters,
-  });
-
-  final String label;
-  final TextEditingController controller;
-  final String unit;
-  final IconData icon;
-  final TextInputType? keyboardType;
-  final List<TextInputFormatter>? inputFormatters;
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Text(label,
-            style: const TextStyle(
-                color: AksaColors.textSecondary,
-                fontSize: 13,
-                fontWeight: FontWeight.w500)),
-        const SizedBox(height: 8),
-        TextField(
-          controller: controller,
-          keyboardType: keyboardType,
-          inputFormatters: inputFormatters,
-          style: const TextStyle(color: AksaColors.textPrimary),
-          decoration: InputDecoration(
-            prefixIcon: Icon(icon, color: AksaColors.textMuted, size: 18),
-            suffixText: unit,
-            suffixStyle: const TextStyle(
-                color: AksaColors.textMuted, fontWeight: FontWeight.w500),
-          ),
-        ),
-      ],
     );
   }
 }
