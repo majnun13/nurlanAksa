@@ -119,19 +119,50 @@ async def get_nutrition_for_food(food_name: str, gram: float) -> dict | None:
 
 
 async def search_foods(query: str) -> list[dict]:
-    """Yemek adına göre veritabanında arama yap."""
+    """Yemek adına göre veritabanında arama yap. Türkçe karakterlere karşı duyarlıdır."""
     pool = await get_pool()
-    query_lower = query.strip().lower()
-    
-    if not query_lower:
-        rows = await pool.fetch("SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items ORDER BY name")
-    else:
-        # LIKE kullanarak arama (başında veya sonunda geçebilir)
-        search_term = f"%{query_lower}%"
+    query_raw = query.strip()
+
+    if not query_raw:
         rows = await pool.fetch(
-            "SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items WHERE name ILIKE $1 ORDER BY name",
-            search_term
+            "SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items ORDER BY name"
         )
+    else:
+        # Türkçe → ASCII dönüşüm tablosu
+        tr_map = {
+            'ı': 'i', 'İ': 'i', 'I': 'i',
+            'ğ': 'g', 'Ğ': 'g',
+            'ü': 'u', 'Ü': 'u',
+            'ş': 's', 'Ş': 's',
+            'ö': 'o', 'Ö': 'o',
+            'ç': 'c', 'Ç': 'c',
+        }
+
+        def normalize_tr(s: str) -> str:
+            return ''.join(tr_map.get(c, c.lower()) for c in s)
+
+        # 3 farklı arama biçimi:
+        # 1) Orijinal (Türkçe harfler, boşluklu) – DB'de Türkçe + boşlukla saklıysa
+        form_original  = f"%{query_raw.lower()}%"
+        # 2) ASCII normalize, boşluklu – DB'de ASCII + boşlukla saklıysa
+        form_ascii_sp  = f"%{normalize_tr(query_raw)}%"
+        # 3) ASCII normalize, tire ile – DB'de ASCII + tireli saklıysa (ör: adana-kebap)
+        form_ascii_hyp = f"%{normalize_tr(query_raw).replace(' ', '-')}%"
+
+        rows = await pool.fetch(
+            """
+            SELECT DISTINCT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g
+            FROM food_items
+            WHERE name ILIKE $1
+               OR name ILIKE $2
+               OR name ILIKE $3
+            ORDER BY name
+            """,
+            form_original,
+            form_ascii_sp,
+            form_ascii_hyp,
+        )
+
 
     foods = []
     for row in rows:
