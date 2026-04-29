@@ -612,61 +612,87 @@ async def get_user_exercise_plan(user_id: str, difficulty: str = "normal") -> di
     """
     Kullanıcı için kişiselleştirilmiş egzersiz planı oluşturur.
     Hem health_profiles hem daily_wearable_logs verilerini kullanır.
+    Herhangi bir veri eksikliğinde güvenli varsayılan değerler devreye girer.
     """
-    # 1. Kullanıcı profilini çek
-    pool = await get_pool()
-    row = await pool.fetchrow(
-        "SELECT age, weight_kg, height_cm, gender, lifestyle, health_goal, medical_conditions FROM health_profiles WHERE user_id = $1 LIMIT 1",
-        user_id,
-    )
+    try:
+        # 1. Kullanıcı profilini çek
+        pool = await get_pool()
+        row = await pool.fetchrow(
+            "SELECT age, weight_kg, height_cm, gender, lifestyle, health_goal, medical_conditions FROM health_profiles WHERE user_id = $1 LIMIT 1",
+            user_id,
+        )
 
-    if not row:
-        age, lifestyle, health_goal, gender = 30, "Orta", "maintain", "erkek"
-        medical_conditions: list[str] = []
-    else:
-        age               = row["age"]        or 30
-        lifestyle         = row["lifestyle"]  or "Orta"
-        health_goal       = row["health_goal"] or "maintain"
-        gender            = (row["gender"] or "erkek").lower()
-        medical_conditions = list(row["medical_conditions"] or [])
+        if not row:
+            age, lifestyle, health_goal, gender = 30, "Orta", "maintain", "erkek"
+            medical_conditions: list[str] = []
+        else:
+            age                = row["age"]        or 30
+            lifestyle          = row["lifestyle"]  or "Orta"
+            health_goal        = row["health_goal"] or "maintain"
+            gender             = (row["gender"] or "erkek").lower()
+            medical_conditions = list(row["medical_conditions"] or [])
 
-    resting_hr = 62 if gender in ("erkek", "male") else 68
+        resting_hr = 62 if gender in ("erkek", "male") else 68
 
-    # 2. Wearable verisini DB'den çek
-    wearable = await _get_wearable_context(user_id, age=age)
+        # 2. Wearable verisini DB'den çek
+        wearable = await _get_wearable_context(user_id, age=age)
 
-    # 3. Haftalık istatistikleri çek (YENİ)
-    weekly_stats = await _get_weekly_stats(user_id)
+        # 3. Haftalık istatistikleri çek
+        weekly_stats = await _get_weekly_stats(user_id)
 
-    # Gerçek resting_hr varsa onu kullan
-    if wearable.get("resting_hr"):
-        resting_hr = wearable["resting_hr"]
+        # Gerçek resting_hr varsa onu kullan
+        if wearable.get("resting_hr"):
+            resting_hr = wearable["resting_hr"]
 
-    # 3. Temel egzersiz listesini lifestyle×goal matrisinden al
-    base_keys = list(_EXERCISE_MATRIX.get((lifestyle, health_goal), ["walking", "yoga"]))
+        # 4. Temel egzersiz listesini lifestyle×goal matrisinden al
+        base_keys = list(_EXERCISE_MATRIX.get((lifestyle, health_goal), ["walking", "yoga"]))
 
-    # 4. Yaşa göre egzersiz ayarla (YENİ)
-    base_keys, difficulty = _apply_age_adjustments(base_keys, age, difficulty)
+        # 5. Yaşa göre egzersiz ayarla
+        base_keys, difficulty = _apply_age_adjustments(base_keys, age, difficulty)
 
-    # 5. Medikal kısıtlamalara göre filtrele (YENİ)
-    base_keys, difficulty = _apply_medical_restrictions(base_keys, medical_conditions, difficulty)
+        # 6. Medikal kısıtlamalara göre filtrele
+        base_keys, difficulty = _apply_medical_restrictions(base_keys, medical_conditions, difficulty)
 
-    # 6. Wearable verilerine göre egzersiz listesini ve difficulty'yi ayarla
-    adjusted_keys, difficulty = _apply_wearable_adjustments(base_keys, wearable, difficulty)
+        # 7. Wearable verilerine göre egzersiz listesini ve difficulty'yi ayarla
+        adjusted_keys, difficulty = _apply_wearable_adjustments(base_keys, wearable, difficulty)
 
-    # 7. Bileşenleri oluştur
-    hr_zones        = calculate_hr_zones(age, health_goal)
-    recommendations = _build_recommendations(adjusted_keys, difficulty)
-    weekly_plan     = _build_weekly_plan(health_goal)
-    rationale       = _build_rationale(lifestyle, health_goal, difficulty, wearable)
-    hr_hourly       = _simulate_heart_rate_hourly(resting_hr)
+        # 8. Bileşenleri oluştur
+        hr_zones        = calculate_hr_zones(age, health_goal)
+        recommendations = _build_recommendations(adjusted_keys, difficulty)
+        weekly_plan     = _build_weekly_plan(health_goal)
+        rationale       = _build_rationale(lifestyle, health_goal, difficulty, wearable)
+        hr_hourly       = _simulate_heart_rate_hourly(resting_hr)
 
-    return {
-        "rationale":         rationale,
-        "recommendations":   recommendations,
-        "hr_zone":           hr_zones,
-        "weekly_plan":       weekly_plan,
-        "heart_rate_hourly": hr_hourly,
-        "recovery_score":    wearable["recovery_score"],
-        "weekly_stats":      weekly_stats,
-    }
+        return {
+            "rationale":         rationale,
+            "recommendations":   recommendations,
+            "hr_zone":           hr_zones,
+            "weekly_plan":       weekly_plan,
+            "heart_rate_hourly": hr_hourly,
+            "recovery_score":    wearable["recovery_score"],
+            "weekly_stats":      weekly_stats,
+        }
+
+    except Exception as e:
+        import traceback, logging
+        logging.error(f"[ExerciseService] Beklenmedik hata: {e}\n{traceback.format_exc()}")
+        # Güvenli fallback plan — uygulama asla çökmez
+        wearable_fallback = {
+            "step_count": 5000, "avg_hr_today": 72, "resting_hr": 65,
+            "sleep_score": 70, "sleep_hours": 7.0, "hrv": 45,
+            "active_minutes": 30, "calories_burned": 300,
+            "recovery_score": 50, "has_real_data": False,
+        }
+        return {
+            "rationale": {
+                "title": "Kişisel Egzersiz Planı",
+                "description": "Verileriniz yüklenirken genel bir plan oluşturuldu.",
+                "tags": [{"label": "💪 Aktif"}, {"label": "❤️ Sağlıklı"}],
+            },
+            "recommendations": _build_recommendations(["walking", "yoga"], "normal"),
+            "hr_zone":           calculate_hr_zones(30, "maintain"),
+            "weekly_plan":       _build_weekly_plan("maintain"),
+            "heart_rate_hourly": _simulate_heart_rate_hourly(65),
+            "recovery_score":    50,
+            "weekly_stats":      {"total_minutes": 0, "total_calories": 0, "active_days": 0},
+        }
