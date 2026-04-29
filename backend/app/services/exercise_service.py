@@ -245,38 +245,61 @@ _WEEKLY_PLANS = {
         ("Sal", "Tempolu Yürüyüş (30 dk)"),
         ("Çar", "Güç Antrenmanı (40 dk)"),
         ("Per", "HIIT Kardiyo (20 dk)"),
-        ("Cum", "Bisiklet / Yüzme (35 dk)"),
+        ("Cum", "Bisiklet / Spinning (35 dk)"),
         ("Cmt", "Yoga & Esneme (20 dk)"),
         ("Paz", "Aktif Dinlenme"),
     ],
     "maintain": [
-        ("Pzt", "Kardiyo (30 dk)"),
+        ("Pzt", "Bisiklet / Spinning (30 dk)"),
         ("Sal", "Güç Antrenmanı (35 dk)"),
-        ("Çar", "Aktif Dinlenme / Yürüyüş"),
-        ("Per", "Kardiyo + Core (30 dk)"),
+        ("Çar", "Aktif Dinlenme"),
+        ("Per", "Tempolu Yürüyüş (30 dk)"),
         ("Cum", "Güç Antrenmanı (35 dk)"),
-        ("Cmt", "Hafif Esneme & Yoga"),
-        ("Paz", "Tam Dinlenme"),
+        ("Cmt", "Yoga & Esneme (20 dk)"),
+        ("Paz", "Aktif Dinlenme"),
     ],
     "gain_weight": [
-        ("Pzt", "Üst Vücut Güç (45 dk)"),
-        ("Sal", "Alt Vücut Güç (45 dk)"),
+        ("Pzt", "Güç Antrenmanı — Üst Vücut (45 dk)"),
+        ("Sal", "Güç Antrenmanı — Alt Vücut (45 dk)"),
         ("Çar", "Aktif Dinlenme"),
-        ("Per", "Üst Vücut Güç (45 dk)"),
-        ("Cum", "Alt Vücut Güç (45 dk)"),
-        ("Cmt", "Hafif Kardiyo (20 dk)"),
-        ("Paz", "Tam Dinlenme"),
+        ("Per", "Güç Antrenmanı — Üst Vücut (45 dk)"),
+        ("Cum", "Güç Antrenmanı — Alt Vücut (45 dk)"),
+        ("Cmt", "Bisiklet / Spinning (20 dk)"),
+        ("Paz", "Aktif Dinlenme"),
     ],
 }
 
 _DAY_ORDER = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
 
 
-def _build_weekly_plan(health_goal: str) -> list[dict]:
+async def _build_weekly_plan(health_goal: str, user_id: str) -> list[dict]:
+    """
+    Haftalık plan listesi. `done` alanı DB'deki gerçek antrenman kayıtlarına göre belirlenir.
+    """
+    today         = datetime.date.today()
+    today_weekday = today.weekday()          # Pzt=0 ... Paz=6
+    week_start    = today - datetime.timedelta(days=today_weekday)
+
+    # Hangi günlerde active_minutes > 0 var?
+    try:
+        pool = await get_pool()
+        rows = await pool.fetch(
+            """
+            SELECT log_date FROM daily_wearable_logs
+            WHERE user_id = $1
+              AND log_date >= $2
+              AND log_date <  $3
+              AND active_minutes > 0
+            """,
+            user_id, week_start, today,   # bugünü dışla (yarım sayılmaz)
+        )
+        active_weekdays = {r["log_date"].weekday() for r in rows}
+    except Exception:
+        active_weekdays = set()
+
     plan_template = _WEEKLY_PLANS.get(health_goal, _WEEKLY_PLANS["maintain"])
-    today_weekday = datetime.date.today().weekday()
     return [
-        {"day": day, "activity": activity, "done": i < today_weekday}
+        {"day": day, "activity": activity, "done": i in active_weekdays}
         for i, (day, activity) in enumerate(plan_template)
     ]
 
@@ -288,32 +311,55 @@ def _build_weekly_plan(health_goal: str) -> list[dict]:
 async def _get_weekly_stats(user_id: str) -> dict:
     """
     Bu haftaki (Pzt–bugün) toplam aktif dakika, kalori ve antrenman günü sayısı.
+    Ayrıca ardışık gün serisi (streak) hesaplanır.
     """
-    pool = await get_pool()
-    today = datetime.date.today()
-    week_start = today - datetime.timedelta(days=today.weekday())  # Pazartesi
+    try:
+        pool = await get_pool()
+        today = datetime.date.today()
+        week_start = today - datetime.timedelta(days=today.weekday())
 
-    row = await pool.fetchrow(
-        """
-        SELECT
-            COALESCE(SUM(active_minutes),  0)::int  AS total_minutes,
-            COALESCE(SUM(calories_burned), 0)::int  AS total_calories,
-            COUNT(DISTINCT log_date)::int            AS workout_days
-        FROM daily_wearable_logs
-        WHERE user_id = $1
-          AND log_date >= $2
-          AND log_date <= $3
-          AND active_minutes > 0
-        """,
-        user_id, week_start, today,
-    )
-    if row:
-        return {
-            "total_active_minutes": row["total_minutes"],
-            "total_calories":       row["total_calories"],
-            "workouts_done":        row["workout_days"],
-        }
-    return {"total_active_minutes": 0, "total_calories": 0, "workouts_done": 0}
+        row = await pool.fetchrow(
+            """
+            SELECT
+                COALESCE(SUM(active_minutes),  0)::int  AS total_minutes,
+                COALESCE(SUM(calories_burned), 0)::int  AS total_calories,
+                COUNT(DISTINCT log_date)::int            AS workout_days
+            FROM daily_wearable_logs
+            WHERE user_id = $1
+              AND log_date >= $2
+              AND log_date <= $3
+              AND active_minutes > 0
+            """,
+            user_id, week_start, today,
+        )
+
+        # Streak: Bugünden geriye ardışık aktif gün sayısı
+        streak_rows = await pool.fetch(
+            """
+            SELECT log_date FROM daily_wearable_logs
+            WHERE user_id = $1 AND active_minutes > 0
+            ORDER BY log_date DESC
+            LIMIT 60
+            """,
+            user_id,
+        )
+        streak = 0
+        check_day = today
+        active_set = {r["log_date"] for r in streak_rows}
+        while check_day in active_set:
+            streak += 1
+            check_day -= datetime.timedelta(days=1)
+
+        if row:
+            return {
+                "total_active_minutes": row["total_minutes"],
+                "total_calories":       row["total_calories"],
+                "workouts_done":        row["workout_days"],
+                "streak_days":          streak,
+            }
+    except Exception:
+        pass
+    return {"total_active_minutes": 0, "total_calories": 0, "workouts_done": 0, "streak_days": 0}
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -659,7 +705,7 @@ async def get_user_exercise_plan(user_id: str, difficulty: str = "normal") -> di
         # 8. Bileşenleri oluştur
         hr_zones        = calculate_hr_zones(age, health_goal)
         recommendations = _build_recommendations(adjusted_keys, difficulty)
-        weekly_plan     = _build_weekly_plan(health_goal)
+        weekly_plan     = await _build_weekly_plan(health_goal, user_id)
         rationale       = _build_rationale(lifestyle, health_goal, difficulty, wearable)
         hr_hourly       = _simulate_heart_rate_hourly(resting_hr)
 

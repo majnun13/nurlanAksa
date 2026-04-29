@@ -60,14 +60,21 @@ class ExerciseRecommendation {
       color: json['color'] ?? 0xFF000000,
     );
   }
-  ExerciseRecommendation copyWith({String? duration}) {
+  ExerciseRecommendation copyWith({
+    String? icon,
+    String? type,
+    String? duration,
+    String? intensity,
+    String? desc,
+    int? color,
+  }) {
     return ExerciseRecommendation(
-      icon: icon,
-      type: type,
-      duration: duration ?? this.duration,
-      intensity: intensity,
-      desc: desc,
-      color: color,
+      icon:      icon      ?? this.icon,
+      type:      type      ?? this.type,
+      duration:  duration  ?? this.duration,
+      intensity: intensity ?? this.intensity,
+      desc:      desc      ?? this.desc,
+      color:     color     ?? this.color,
     );
   }
 }
@@ -116,11 +123,13 @@ class WeeklyStats {
   final int totalActiveMinutes;
   final int totalCalories;
   final int workoutsDone;
+  final int streakDays;
 
   WeeklyStats({
     required this.totalActiveMinutes,
     required this.totalCalories,
     required this.workoutsDone,
+    this.streakDays = 0,
   });
 
   factory WeeklyStats.fromJson(Map<String, dynamic> json) {
@@ -128,6 +137,7 @@ class WeeklyStats {
       totalActiveMinutes: json['total_active_minutes'] ?? 0,
       totalCalories:      json['total_calories']       ?? 0,
       workoutsDone:       json['workouts_done']        ?? 0,
+      streakDays:         json['streak_days']          ?? 0,
     );
   }
 }

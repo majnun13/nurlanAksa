@@ -31,8 +31,26 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   void initState() {
     super.initState();
     _repository = ExerciseRepository(ApiClient.dio);
-    _loadExerciseData();
+    _loadPrefsAndData();
   }
+
+  Future<void> _loadPrefsAndData() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) setState(() => _isTired = prefs.getBool('is_tired_mode') ?? false);
+    await _loadExerciseData();
+  }
+
+  // Egzersiz tipine göre kcal/dakika — backend ile birebir eşleşir
+  static const Map<String, int> _kcalPerMin = {
+    'HIIT Kardiyo':        12,
+    'Güç Antrenmanı':        8,
+    'Bisiklet / Spinning':  7,
+    'Yüzme':                 9,
+    'Kalistenik':            6,
+    'Tempolu Yürüyüş':      4,
+    'Yoga & Esneme':         3,
+    'Aktif Dinlenme':        1,
+  };
 
   Future<void> _loadExerciseData() async {
     setState(() {
@@ -57,7 +75,11 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   }
 
   Future<void> _toggleTired({bool forceTired = false}) async {
-    setState(() => _isTired = forceTired ? true : !_isTired);
+    final newValue = forceTired ? true : !_isTired;
+    setState(() => _isTired = newValue);
+    // Tercihi kalıcı kaydet
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('is_tired_mode', newValue);
     await _loadExerciseData();
   }
 
@@ -65,8 +87,9 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   Future<void> _handleWorkoutResult(
       WorkoutResult result, int recIndex) async {
     // ── Backend'e kaydet (B) ──────────────────────────────────
-    final rec      = _exerciseData!.recommendations[recIndex];
-    final kcal     = (result.completedSeconds ~/ 60) * 5; // ~5 kcal/dk tahmini
+    final rec        = _exerciseData!.recommendations[recIndex];
+    final kcalPerMin = _kcalPerMin[rec.type] ?? 5;
+    final kcal       = (result.completedSeconds ~/ 60) * kcalPerMin;
     unawaited(_repository.completeSession(
       exerciseName:    rec.type,
       durationSeconds: result.completedSeconds,
@@ -76,7 +99,31 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
     ));
 
     if (result.completed) {
-      // Tamamlandı — haftalık planı işaretle (ileride backend'e gönderilebilir)
+      // Konfeti efekti göster
+      if (mounted) _showCompletionCelebration(context);
+
+      // Haftalık planda bugünü ✅ yap (local state)
+      if (_exerciseData != null) {
+        final todayIndex = DateTime.now().weekday - 1;
+        final updatedPlan = _exerciseData!.weeklyPlan.asMap().entries.map((e) {
+          if (e.key == todayIndex) {
+            return WeeklyPlanItem(
+                day: e.value.day, activity: e.value.activity, done: true);
+          }
+          return e.value;
+        }).toList();
+        setState(() {
+          _exerciseData = ExerciseModel(
+            rationale:       _exerciseData!.rationale,
+            recommendations: _exerciseData!.recommendations,
+            hrZone:          _exerciseData!.hrZone,
+            weeklyPlan:      updatedPlan,
+            heartRateHourly: _exerciseData!.heartRateHourly,
+            recoveryScore:   _exerciseData!.recoveryScore,
+            weeklyStats:     _exerciseData!.weeklyStats,
+          );
+        });
+      }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
@@ -91,10 +138,10 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
     } else {
       // Yarıda bırakıldı
       if (result.markedTooHard) {
-        // Zor buldu → easy moda geç
+        // Zor buldu → pref kaydet ve her zaman easy moda geç
         final prefs = await SharedPreferences.getInstance();
-        final preferEasy = prefs.getBool('prefer_easy_mode') ?? false;
-        if (preferEasy && !_isTired) {
+        await prefs.setBool('prefer_easy_mode', true);
+        if (!_isTired) {
           await _toggleTired(forceTired: true);
           if (mounted) {
             ScaffoldMessenger.of(context).showSnackBar(
@@ -435,8 +482,21 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
     );
   }
 
+  // ── Konfeti Kutlama Overlay ─────────────────────────────────
+  void _showCompletionCelebration(BuildContext ctx) {
+    final overlay = Overlay.of(ctx);
+    late OverlayEntry entry;
+    entry = OverlayEntry(
+      builder: (_) => _CompletionOverlay(onDone: () => entry.remove()),
+    );
+    overlay.insert(entry);
+  }
+
   // ── Haftalık İstatistik Özet Kartı (H) ───────────────────────
   Widget _buildWeeklyStatsCard(BuildContext context, WeeklyStats stats) {
+    final streakLabel = stats.streakDays >= 7
+        ? '🔥 ${stats.streakDays} gün'
+        : '${stats.streakDays} gün';
     return AksaCard(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -462,6 +522,16 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
             value: '${stats.workoutsDone} gün',
             label: 'Antrenman',
             color: AksaColors.riskLow,
+          ),
+          Container(width: 1, height: 44,
+              color: AksaColors.textMuted.withValues(alpha: 0.2)),
+          _WeeklyStatChip(
+            icon: Icons.local_fire_department_rounded,
+            value: streakLabel,
+            label: 'Seri',
+            color: stats.streakDays >= 7
+                ? const Color(0xFFFF6B35)
+                : AksaColors.riskMedium,
           ),
         ],
       ),
@@ -797,6 +867,69 @@ class _WeeklyStatChip extends StatelessWidget {
               color: AksaColors.textMuted, fontSize: 10),
         ),
       ],
+    );
+  }
+}
+
+// ── Konfeti Kutlama Widget'ı ─────────────────────────────────────────────────
+class _CompletionOverlay extends StatefulWidget {
+  final VoidCallback onDone;
+  const _CompletionOverlay({required this.onDone});
+
+  @override
+  State<_CompletionOverlay> createState() => _CompletionOverlayState();
+}
+
+class _CompletionOverlayState extends State<_CompletionOverlay>
+    with SingleTickerProviderStateMixin {
+  late AnimationController _ctrl;
+
+  static const _emojis = ['🎉', '🔥', '⚡', '💪', '🏆', '✨'];
+  static const _count   = 18;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..forward().then((_) => widget.onDone());
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    return IgnorePointer(
+      child: AnimatedBuilder(
+        animation: _ctrl,
+        builder: (_, __) {
+          return Stack(
+            children: List.generate(_count, (i) {
+              final frac   = i / _count;
+              final left   = (frac * size.width + i * 37.0) % size.width;
+              final top    = _ctrl.value * size.height * (0.7 + frac * 0.4);
+              final opacity = (1 - _ctrl.value).clamp(0.0, 1.0);
+              return Positioned(
+                left: left,
+                top: top - 60,
+                child: Opacity(
+                  opacity: opacity,
+                  child: Text(
+                    _emojis[i % _emojis.length],
+                    style: TextStyle(fontSize: 24 + (i % 3) * 6.0),
+                  ),
+                ),
+              );
+            }),
+          );
+        },
+      ),
     );
   }
 }
