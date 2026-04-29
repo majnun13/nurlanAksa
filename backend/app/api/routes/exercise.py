@@ -1,65 +1,100 @@
-from fastapi import APIRouter
-from app.schemas.exercise import (
-    ExerciseResponse,
-    RationaleData,
-    RationaleTag,
-    ExerciseRecommendation,
-    HRZoneData,
-    WeeklyPlanItem
-)
+from fastapi import APIRouter, Header, HTTPException, Query
+from pydantic import BaseModel
+from ...schemas.exercise import ExerciseResponse
+from ...services import exercise_service
+from ...core.security import decode_access_token
+from ...core.database import get_pool
+import datetime
 
 router = APIRouter(
     prefix="/exercise",
     tags=["Exercise"]
 )
 
+
+def _get_user_id(authorization: str) -> str:
+    """Authorization: Bearer <token> header'dan user_id çıkar."""
+    if not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Token gerekli.")
+    token = authorization.removeprefix("Bearer ").strip()
+    user_id = decode_access_token(token)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Geçersiz token.")
+    return user_id
+
+
 @router.get("/summary", response_model=ExerciseResponse)
-async def get_exercise_summary():
+async def get_exercise_summary(
+    authorization: str = Header(...),
+    difficulty: str = Query(
+        default="normal",
+        pattern="^(normal|easy)$",
+        description="Zorluk seviyesi: 'normal' veya 'easy' (Bugün Yorgunum).",
+    ),
+):
     """
-    Kullanıcının Egzersiz (Exercise) ekranında gösterilecek verileri döndürür.
-    Şu an için mock vari verilerle dönmektedir, ileride gerçek veritabanı yansıyacaktır.
+    Kullanıcının sağlık profiline göre kişiselleştirilmiş egzersiz planını döner.
+
+    - **difficulty=normal** : Standart plan (varsayılan)
+    - **difficulty=easy**   : Hafifletilmiş plan (kullanıcı yorgun / wearable verisi kötü)
+
+    Token zorunludur — profil veritabanından kullanıcıya özel çekilir.
     """
-    return ExerciseResponse(
-        rationale=RationaleData(
-            title="AI Analizi",
-            description="Adım sayınız ortalamanın altında ve uyku kaliteniz düşüktü. Bugün hafif aktivite ve esneme önerilmektedir.",
-            tags=[
-                RationaleTag(label="💤 Uyku Düşük"),
-                RationaleTag(label="🚶 Az Adım"),
-                RationaleTag(label="❤️ HR Yüksek"),
-            ]
-        ),
-        recommendations=[
-            ExerciseRecommendation(
-                icon="🧘",
-                type="Yoga & Esneme",
-                duration="15 dk",
-                intensity="Düşük Yoğunluk",
-                desc="Güne başlarken kaslarınızı rahatlatmak ve stresi azaltmak için ideal başlangıç.",
-                color=0xFF10B981 # AksaColors.primary
-            ),
-            ExerciseRecommendation(
-                icon="🚶",
-                type="Tempolu Yürüyüş",
-                duration="30 dk",
-                intensity="Orta Yoğunluk",
-                desc="Hedefinize ulaşmak için öğle arasında kısa bir açık hava yürüyüşü yapabilirsiniz.",
-                color=0xFF0EA5E9 # AksaColors.accent
-            )
-        ],
-        hr_zone=HRZoneData(
-            min_hr=90,
-            target_hr=110,
-            max_hr=130
-        ),
-        weekly_plan=[
-            WeeklyPlanItem(day="Pzt", activity="Kardiyo & Core (30dk)", done=True),
-            WeeklyPlanItem(day="Sal", activity="Üst Vücut Güç (40dk)", done=True),
-            WeeklyPlanItem(day="Çar", activity="Aktif Dinlenme (Yürüyüş)", done=True),
-            WeeklyPlanItem(day="Per", activity="Alt Vücut Güç (40dk)", done=True),
-            WeeklyPlanItem(day="Cum", activity="HIIT Kardiyo (20dk)", done=False),
-            WeeklyPlanItem(day="Cmt", activity="Hafif Esneme & Yoga", done=False),
-            WeeklyPlanItem(day="Paz", activity="Tam Dinlenme", done=False),
-        ],
-        heart_rate_hourly=[65, 62, 60, 58, 62, 68, 75, 82, 110, 115, 95, 85, 78, 80, 75, 72, 85, 120, 125, 90, 80, 75, 70, 68]
+    user_id = _get_user_id(authorization)
+    data = await exercise_service.get_user_exercise_plan(user_id, difficulty=difficulty)
+    return ExerciseResponse(**data)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  Antrenman Tamamlama / Kaydetme
+# ─────────────────────────────────────────────────────────────────────────────
+
+class CompleteSessionRequest(BaseModel):
+    exercise_name: str
+    duration_seconds: int
+    calories_burned: int
+    completed: bool          # True → tam tamamlandı, False → yarıda bırakıldı
+    marked_too_hard: bool = False
+
+
+class CompleteSessionResponse(BaseModel):
+    success: bool
+    message: str
+    total_active_minutes_today: int
+    total_calories_today: int
+
+
+@router.post("/complete-session", response_model=CompleteSessionResponse)
+async def complete_workout_session(
+    body: CompleteSessionRequest,
+    authorization: str = Header(...),
+):
+    """
+    Kullanıcı antrenmanı tamamladığında veya yarıda bıraktığında çağrılır.
+    daily_wearable_logs tablosundaki active_minutes ve calories_burned güncellenir.
+    """
+    user_id = _get_user_id(authorization)
+    pool    = await get_pool()
+    today   = datetime.date.today()
+
+    duration_minutes = max(1, body.duration_seconds // 60)
+
+    # Tek seferde UPSERT — updated_at kolonu yok, kaldırıldı
+    await pool.execute(
+        """
+        INSERT INTO daily_wearable_logs (user_id, log_date, active_minutes, calories_burned)
+        VALUES ($1, $2, $3, $4)
+        ON CONFLICT (user_id, log_date) DO UPDATE
+        SET active_minutes  = daily_wearable_logs.active_minutes  + EXCLUDED.active_minutes,
+            calories_burned = daily_wearable_logs.calories_burned + EXCLUDED.calories_burned
+        """,
+        user_id, today, duration_minutes, body.calories_burned,
+    )
+
+    status = "tamamlandı" if body.completed else "yarıda bırakıldı"
+    return CompleteSessionResponse(
+        success=True,
+        message=f"'{body.exercise_name}' antrenmanı {status} ve kaydedildi.",
+        total_active_minutes_today=new_minutes,
+        total_calories_today=new_calories,
     )

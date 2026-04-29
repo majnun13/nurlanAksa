@@ -27,9 +27,16 @@ class WeeklyPlanItem(BaseModel):
     activity: str
     done: bool
 
+class WeeklyStats(BaseModel):
+    total_active_minutes: int
+    total_calories: int
+    workouts_done: int
+
 class ExerciseResponse(BaseModel):
     rationale: RationaleData
     recommendations: List[ExerciseRecommendation]
     hr_zone: HRZoneData
     weekly_plan: List[WeeklyPlanItem]
     heart_rate_hourly: List[float]
+    recovery_score: int = 65
+    weekly_stats: WeeklyStats

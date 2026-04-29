@@ -1,13 +1,14 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:fl_chart/fl_chart.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../../core/widgets/aksa_app_bar.dart';
 import '../../core/widgets/aksa_widgets.dart';
 import '../../app/theme.dart';
-import '../../data/mock/mock_data.dart';
-
 import '../../core/network/api_client.dart';
 import '../../data/repositories/exercise_repository.dart';
 import '../../data/models/exercise_model.dart';
+import 'workout_session_screen.dart';
 
 class ExerciseScreen extends StatefulWidget {
   const ExerciseScreen({super.key});
@@ -21,6 +22,10 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   ExerciseModel? _exerciseData;
   bool _isLoading = true;
   String? _error;
+
+  // ── Zorluk / "Bugün Yorgunum" durumu ─────────────────────────
+  bool _isTired = false;
+  String get _difficulty => _isTired ? 'easy' : 'normal';
 
   @override
   void initState() {
@@ -36,7 +41,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
     });
 
     try {
-      final data = await _repository.getExerciseSummary();
+      final data = await _repository.getExerciseSummary(difficulty: _difficulty);
       setState(() {
         _exerciseData = data;
         _isLoading = false;
@@ -47,6 +52,82 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
           _error = e.toString();
           _isLoading = false;
         });
+      }
+    }
+  }
+
+  Future<void> _toggleTired({bool forceTired = false}) async {
+    setState(() => _isTired = forceTired ? true : !_isTired);
+    await _loadExerciseData();
+  }
+
+  // Antrenman sonucu işleme
+  Future<void> _handleWorkoutResult(
+      WorkoutResult result, int recIndex) async {
+    // ── Backend'e kaydet (B) ──────────────────────────────────
+    final rec      = _exerciseData!.recommendations[recIndex];
+    final kcal     = (result.completedSeconds ~/ 60) * 5; // ~5 kcal/dk tahmini
+    unawaited(_repository.completeSession(
+      exerciseName:    rec.type,
+      durationSeconds: result.completedSeconds,
+      caloriesBurned:  kcal,
+      completed:       result.completed,
+      markedTooHard:   result.markedTooHard,
+    ));
+
+    if (result.completed) {
+      // Tamamlandı — haftalık planı işaretle (ileride backend'e gönderilebilir)
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text('🎉 Antrenman tamamlandı! Harika iş!'),
+            backgroundColor: AksaColors.riskLow,
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12)),
+          ),
+        );
+      }
+    } else {
+      // Yarıda bırakıldı
+      if (result.markedTooHard) {
+        // Zor buldu → easy moda geç
+        final prefs = await SharedPreferences.getInstance();
+        final preferEasy = prefs.getBool('prefer_easy_mode') ?? false;
+        if (preferEasy && !_isTired) {
+          await _toggleTired(forceTired: true);
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text('💆 Hafif mod aktif. Bir sonraki öneri güncellendi.'),
+                backgroundColor: AksaColors.riskMedium,
+                behavior: SnackBarBehavior.floating,
+              ),
+            );
+          }
+          return; // _loadExerciseData zaten çağrıldı
+        }
+      }
+
+      // Kalan süreyi öneriye yansıt
+      if (result.remainingMinutes > 0 && _exerciseData != null) {
+        final updated = List<ExerciseRecommendation>.from(
+            _exerciseData!.recommendations);
+        if (recIndex < updated.length) {
+          updated[recIndex] = updated[recIndex]
+              .copyWith(duration: '${result.remainingMinutes} dk kaldı');
+          setState(() {
+            _exerciseData = ExerciseModel(
+              rationale:       _exerciseData!.rationale,
+              recommendations: updated,
+              hrZone:          _exerciseData!.hrZone,
+              weeklyPlan:      _exerciseData!.weeklyPlan,
+              heartRateHourly: _exerciseData!.heartRateHourly,
+              recoveryScore:   _exerciseData!.recoveryScore,
+              weeklyStats:     _exerciseData!.weeklyStats,
+            );
+          });
+        }
       }
     }
   }
@@ -98,9 +179,11 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
 
     return Scaffold(
       backgroundColor: AksaColors.bg,
-      appBar: const AksaAppBar(
+      appBar: AksaAppBar(
         title: 'Egzersiz',
-        subtitle: 'Kişiselleştirilmiş öneri & plan',
+        subtitle: _isTired
+            ? '😴 Dinlenme modu aktif'
+            : 'Kişiselleştirilmiş öneri & plan',
       ),
       body: RefreshIndicator(
         onRefresh: _loadExerciseData,
@@ -110,6 +193,9 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
           padding: const EdgeInsets.only(bottom: 32),
           physics: const AlwaysScrollableScrollPhysics(),
           children: [
+            // ── "Bugün Yorgunum" Toggle Banner ──────────────────
+            _buildTiredBanner(),
+
             // ── Personalised Rationale
             const SectionHeader('Bugün İçin Öneri',
                 subtitle: 'Verilerinize göre oluşturuldu'),
@@ -118,12 +204,24 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
               child: _buildRationaleCard(context, data.rationale),
             ),
 
+            // ── Toparlanma Skoru (F)
+            const SectionHeader('Toparlanma Durumu',
+                subtitle: 'Bugünkü vücut hazırlığı'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildRecoveryCard(context, data.recoveryScore),
+            ),
+
             // ── Activity Cards
             const SectionHeader('Önerilen Aktiviteler'),
-            ...data.recommendations.map(
-              (rec) => Padding(
+            ...data.recommendations.asMap().entries.map(
+              (entry) => Padding(
                 padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-                child: _ExerciseCard(rec: rec),
+                child: _ExerciseCard(
+                  rec: entry.value,
+                  index: entry.key,
+                  onResult: _handleWorkoutResult,
+                ),
               ),
             ),
 
@@ -132,6 +230,14 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildHRZoneCard(context, data.hrZone),
+            ),
+
+            // ── Haftalık Özet İstatistik (H)
+            const SectionHeader('Bu Haftaki Aktivite',
+                subtitle: 'Pazartesiden bugüne'),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              child: _buildWeeklyStatsCard(context, data.weeklyStats),
             ),
 
             // ── Weekly Plan
@@ -155,6 +261,213 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
     );
   }
 
+  // ── "Bugün Yorgunum" Toggle Banner ───────────────────────────
+  Widget _buildTiredBanner() {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      child: GestureDetector(
+        onTap: _isLoading ? null : _toggleTired,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 300),
+          curve: Curves.easeInOut,
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+          decoration: BoxDecoration(
+            color: _isTired
+                ? const Color(0xFF7C3AED).withValues(alpha: 0.15)
+                : AksaColors.surfaceElevated,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(
+              color: _isTired
+                  ? const Color(0xFF7C3AED).withValues(alpha: 0.5)
+                  : AksaColors.textMuted.withValues(alpha: 0.2),
+              width: 1,
+            ),
+          ),
+          child: Row(
+            children: [
+              // İkon
+              AnimatedSwitcher(
+                duration: const Duration(milliseconds: 250),
+                child: Icon(
+                  _isTired ? Icons.bedtime_rounded : Icons.bolt_rounded,
+                  key: ValueKey(_isTired),
+                  color: _isTired
+                      ? const Color(0xFFA78BFA)
+                      : AksaColors.textSecondary,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              // Metin
+              Expanded(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: Column(
+                    key: ValueKey(_isTired),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        _isTired
+                            ? 'Dinlenme modu aktif'
+                            : 'Bugün yorgun hissediyor musun?',
+                        style: TextStyle(
+                          color: _isTired
+                              ? const Color(0xFFA78BFA)
+                              : AksaColors.textPrimary,
+                          fontWeight: FontWeight.w600,
+                          fontSize: 13,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        _isTired
+                            ? 'Egzersizler hafifletildi. Dokunarak normale dön.'
+                            : 'Dokunarak önerileri hafiflet.',
+                        style: const TextStyle(
+                          color: AksaColors.textMuted,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              // Toggle chip
+              AnimatedContainer(
+                duration: const Duration(milliseconds: 300),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: _isTired
+                      ? const Color(0xFF7C3AED).withValues(alpha: 0.25)
+                      : AksaColors.primary.withValues(alpha: 0.15),
+                  borderRadius: BorderRadius.circular(20),
+                ),
+                child: Text(
+                  _isTired ? 'Aktif' : 'Normal',
+                  style: TextStyle(
+                    color: _isTired
+                        ? const Color(0xFFA78BFA)
+                        : AksaColors.primary,
+                    fontSize: 11,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ── Toparlanma Skoru Kartı (F) ───────────────────────────────
+  Widget _buildRecoveryCard(BuildContext context, int score) {
+    final Color scoreColor = score >= 75
+        ? AksaColors.riskLow
+        : score >= 45
+            ? AksaColors.riskMedium
+            : AksaColors.riskHigh;
+    final String label = score >= 75
+        ? 'Harika — Antrenman için hazırsın!'
+        : score >= 45
+            ? 'Orta — Hafif antrenman önerilir'
+            : 'Düşük — Dinlenmeyi tercih et';
+
+    return AksaCard(
+      child: Row(
+        children: [
+          // Daire gösterge
+          SizedBox(
+            width: 72,
+            height: 72,
+            child: Stack(
+              alignment: Alignment.center,
+              children: [
+                TweenAnimationBuilder<double>(
+                  tween: Tween(begin: 0, end: score / 100),
+                  duration: const Duration(milliseconds: 900),
+                  curve: Curves.easeOut,
+                  builder: (_, v, __) => CircularProgressIndicator(
+                    value: v,
+                    strokeWidth: 7,
+                    backgroundColor: AksaColors.surfaceElevated,
+                    color: scoreColor,
+                    strokeCap: StrokeCap.round,
+                  ),
+                ),
+                Text(
+                  '$score',
+                  style: TextStyle(
+                    color: scoreColor,
+                    fontWeight: FontWeight.w800,
+                    fontSize: 18,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 16),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Toparlanma Skoru',
+                  style: const TextStyle(
+                      color: AksaColors.textSecondary,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  label,
+                  style: TextStyle(
+                      color: scoreColor,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ── Haftalık İstatistik Özet Kartı (H) ───────────────────────
+  Widget _buildWeeklyStatsCard(BuildContext context, WeeklyStats stats) {
+    return AksaCard(
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceAround,
+        children: [
+          _WeeklyStatChip(
+            icon: Icons.timer_outlined,
+            value: '${stats.totalActiveMinutes} dk',
+            label: 'Aktif Süre',
+            color: AksaColors.primary,
+          ),
+          Container(width: 1, height: 44,
+              color: AksaColors.textMuted.withValues(alpha: 0.2)),
+          _WeeklyStatChip(
+            icon: Icons.local_fire_department_outlined,
+            value: '${stats.totalCalories} kcal',
+            label: 'Kalori',
+            color: AksaColors.riskMedium,
+          ),
+          Container(width: 1, height: 44,
+              color: AksaColors.textMuted.withValues(alpha: 0.2)),
+          _WeeklyStatChip(
+            icon: Icons.fitness_center_outlined,
+            value: '${stats.workoutsDone} gün',
+            label: 'Antrenman',
+            color: AksaColors.riskLow,
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildRationaleCard(BuildContext context, RationaleData data) {
     return GradientCard(
       gradient: const LinearGradient(
@@ -168,7 +481,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
           Container(
             padding: const EdgeInsets.all(10),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.15),
+              color: Colors.white.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(12),
             ),
             child: const Icon(Icons.psychology_outlined,
@@ -225,13 +538,13 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
               Container(
                 width: 1,
                 height: 50,
-                color: AksaColors.textMuted.withOpacity(0.3),
+                color: AksaColors.textMuted.withValues(alpha: 0.3),
               ),
               _HRZoneValue('Hedef', data.targetHr.toString(), 'bpm', AksaColors.primary),
               Container(
                 width: 1,
                 height: 50,
-                color: AksaColors.textMuted.withOpacity(0.3),
+                color: AksaColors.textMuted.withValues(alpha: 0.3),
               ),
               _HRZoneValue('Max', data.maxHr.toString(), 'bpm', AksaColors.riskMedium),
             ],
@@ -273,17 +586,19 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   }
 
   Widget _buildWeeklyPlan(BuildContext context, List<WeeklyPlanItem> plan) {
+    // Dart: Pazartesi=1 ... Pazar=7 → 0-indexed: Pzt=0 ... Paz=6
+    final todayIndex = DateTime.now().weekday - 1;
     return AksaCard(
       padding: const EdgeInsets.all(0),
       child: Column(
         children: plan.asMap().entries.map((e) {
-          final i = e.key;
+          final i    = e.key;
           final item = e.value;
-          final isToday = i == 5; // Cumartesi örnek
-          final done = item.done;
+          final isToday = i == todayIndex;
+          final done    = item.done;
           return Container(
             decoration: BoxDecoration(
-              color: isToday ? AksaColors.primary.withOpacity(0.08) : null,
+              color: isToday ? AksaColors.primary.withValues(alpha: 0.08) : null,
               border: i < plan.length - 1
                   ? const Border(
                       bottom: BorderSide(color: Color(0xFF1E293B)))
@@ -303,7 +618,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
                 height: 40,
                 decoration: BoxDecoration(
                   color: isToday
-                      ? AksaColors.primary.withOpacity(0.2)
+                      ? AksaColors.primary.withValues(alpha: 0.2)
                       : AksaColors.surfaceElevated,
                   borderRadius: BorderRadius.circular(10),
                 ),
@@ -338,7 +653,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
                           padding: const EdgeInsets.symmetric(
                               horizontal: 8, vertical: 3),
                           decoration: BoxDecoration(
-                            color: AksaColors.primary.withOpacity(0.2),
+                            color: AksaColors.primary.withValues(alpha: 0.2),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: const Text('Bugün',
@@ -432,8 +747,8 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
                   show: true,
                   gradient: LinearGradient(
                     colors: [
-                      AksaColors.riskHigh.withOpacity(0.25),
-                      AksaColors.riskHigh.withOpacity(0.0),
+                      AksaColors.riskHigh.withValues(alpha: 0.25),
+                      AksaColors.riskHigh.withValues(alpha: 0.0),
                     ],
                     begin: Alignment.topCenter,
                     end: Alignment.bottomCenter,
@@ -448,9 +763,49 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   }
 }
 
+class _WeeklyStatChip extends StatelessWidget {
+  const _WeeklyStatChip({
+    required this.icon,
+    required this.value,
+    required this.label,
+    required this.color,
+  });
+  final IconData icon;
+  final String value;
+  final String label;
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Icon(icon, color: color, size: 20),
+        const SizedBox(height: 6),
+        Text(
+          value,
+          style: TextStyle(
+            color: color,
+            fontWeight: FontWeight.w700,
+            fontSize: 14,
+          ),
+        ),
+        const SizedBox(height: 2),
+        Text(
+          label,
+          style: const TextStyle(
+              color: AksaColors.textMuted, fontSize: 10),
+        ),
+      ],
+    );
+  }
+}
+
 class _ExerciseCard extends StatelessWidget {
-  const _ExerciseCard({required this.rec});
+  const _ExerciseCard({required this.rec, required this.index, required this.onResult});
   final ExerciseRecommendation rec;
+  final int index;
+  final Future<void> Function(WorkoutResult, int) onResult;
 
   @override
   Widget build(BuildContext context) {
@@ -464,7 +819,7 @@ class _ExerciseCard extends StatelessWidget {
             width: 52,
             height: 52,
             decoration: BoxDecoration(
-              color: color.withOpacity(0.15),
+              color: color.withValues(alpha: 0.15),
               borderRadius: BorderRadius.circular(14),
             ),
             alignment: Alignment.center,
@@ -488,7 +843,7 @@ class _ExerciseCard extends StatelessWidget {
                       padding: const EdgeInsets.symmetric(
                           horizontal: 10, vertical: 4),
                       decoration: BoxDecoration(
-                        color: color.withOpacity(0.15),
+                        color: color.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(20),
                       ),
                       child: Text(rec.duration,
@@ -513,19 +868,36 @@ class _ExerciseCard extends StatelessWidget {
                         fontSize: 12,
                         height: 1.5)),
                 const SizedBox(height: 10),
-                FilledButton(
-                  onPressed: () {},
+                FilledButton.icon(
+                  onPressed: () async {
+                    final result = await Navigator.of(context).push<WorkoutResult>(
+                      MaterialPageRoute(
+                        fullscreenDialog: true,
+                        builder: (_) => WorkoutSessionScreen(
+                          exerciseName: rec.type,
+                          exerciseIcon: rec.icon,
+                          durationStr: rec.duration,
+                          accentColor: color,
+                          intensity: rec.intensity,
+                        ),
+                      ),
+                    );
+                    if (result != null) {
+                      await onResult(result, index);
+                    }
+                  },
+                  icon: const Icon(Icons.play_arrow_rounded, size: 16),
+                  label: const Text('Başla',
+                      style: TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 12)),
                   style: FilledButton.styleFrom(
-                    backgroundColor: color.withOpacity(0.15),
+                    backgroundColor: color.withValues(alpha: 0.15),
                     foregroundColor: color,
                     padding: const EdgeInsets.symmetric(
                         horizontal: 16, vertical: 8),
                     minimumSize: Size.zero,
                     tapTargetSize: MaterialTapTargetSize.shrinkWrap,
                   ),
-                  child: const Text('Başla',
-                      style: TextStyle(
-                          fontWeight: FontWeight.w600, fontSize: 12)),
                 ),
               ],
             ),
@@ -545,7 +917,7 @@ class _TagChip extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: Colors.white.withOpacity(0.12),
+        color: Colors.white.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Text(label,

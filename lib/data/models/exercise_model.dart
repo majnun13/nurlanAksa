@@ -60,6 +60,16 @@ class ExerciseRecommendation {
       color: json['color'] ?? 0xFF000000,
     );
   }
+  ExerciseRecommendation copyWith({String? duration}) {
+    return ExerciseRecommendation(
+      icon: icon,
+      type: type,
+      duration: duration ?? this.duration,
+      intensity: intensity,
+      desc: desc,
+      color: color,
+    );
+  }
 }
 
 class HRZoneData {
@@ -102,12 +112,34 @@ class WeeklyPlanItem {
   }
 }
 
+class WeeklyStats {
+  final int totalActiveMinutes;
+  final int totalCalories;
+  final int workoutsDone;
+
+  WeeklyStats({
+    required this.totalActiveMinutes,
+    required this.totalCalories,
+    required this.workoutsDone,
+  });
+
+  factory WeeklyStats.fromJson(Map<String, dynamic> json) {
+    return WeeklyStats(
+      totalActiveMinutes: json['total_active_minutes'] ?? 0,
+      totalCalories:      json['total_calories']       ?? 0,
+      workoutsDone:       json['workouts_done']        ?? 0,
+    );
+  }
+}
+
 class ExerciseModel {
   final RationaleData rationale;
   final List<ExerciseRecommendation> recommendations;
   final HRZoneData hrZone;
   final List<WeeklyPlanItem> weeklyPlan;
   final List<double> heartRateHourly;
+  final int recoveryScore;
+  final WeeklyStats weeklyStats;
 
   ExerciseModel({
     required this.rationale,
@@ -115,7 +147,10 @@ class ExerciseModel {
     required this.hrZone,
     required this.weeklyPlan,
     required this.heartRateHourly,
-  });
+    this.recoveryScore = 65,
+    WeeklyStats? weeklyStats,
+  }) : weeklyStats = weeklyStats ??
+            WeeklyStats(totalActiveMinutes: 0, totalCalories: 0, workoutsDone: 0);
 
   factory ExerciseModel.fromJson(Map<String, dynamic> json) {
     return ExerciseModel(
@@ -133,6 +168,10 @@ class ExerciseModel {
               ?.map((h) => (h as num).toDouble())
               .toList() ??
           [],
+      recoveryScore: json['recovery_score'] ?? 65,
+      weeklyStats: json['weekly_stats'] != null
+          ? WeeklyStats.fromJson(json['weekly_stats'])
+          : null,
     );
   }
 }
