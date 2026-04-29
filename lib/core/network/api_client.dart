@@ -26,6 +26,12 @@ class ApiClient {
   }
 
   static Dio? _dio;
+  static SharedPreferences? _prefs;
+
+  /// main() içinde SharedPreferences önceden başlatılarak buraya iletilir.
+  static void initPrefs(SharedPreferences prefs) {
+    _prefs = prefs;
+  }
 
   static Dio get dio {
     _dio ??= Dio(
@@ -38,8 +44,8 @@ class ApiClient {
     )..interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
-            // JWT varsa her isteğe ekle
-            final prefs = await SharedPreferences.getInstance();
+            // Önce önbellekteki prefs'i kullan (hızlı, race condition yok)
+            final prefs = _prefs ?? await SharedPreferences.getInstance();
             final token = prefs.getString(_tokenKey);
             if (token != null) {
               options.headers['Authorization'] = 'Bearer $token';
@@ -47,8 +53,9 @@ class ApiClient {
             handler.next(options);
           },
           onError: (error, handler) {
-            // 401 → token sil (ileride logout yönlendirmesi eklenebilir)
+            // 401 → token sil
             if (error.response?.statusCode == 401) {
+              _prefs?.remove(_tokenKey);
               SharedPreferences.getInstance()
                   .then((p) => p.remove(_tokenKey));
             }

@@ -551,22 +551,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 6),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: AksaColors.riskMedium.withOpacity(0.1),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(
-                          color: AksaColors.riskMedium.withOpacity(0.3)),
-                    ),
-                    child: const Text(
-                      '⚠️ Normalden yüksek',
-                      style: TextStyle(
-                          color: AksaColors.riskMedium, fontSize: 10),
-                    ),
-                  ),
+                   const SizedBox(height: 6),
+                  Builder(builder: (context) {
+                    final sev = sleepHeart.restingHrSeverity;
+                    final Color color = sev == 'danger'
+                        ? AksaColors.riskHigh
+                        : sev == 'warning'
+                            ? AksaColors.riskMedium
+                            : AksaColors.riskLow;
+                    return Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: color.withOpacity(0.1),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: color.withOpacity(0.3)),
+                      ),
+                      child: Text(
+                        sleepHeart.restingHrLabel,
+                        style: TextStyle(color: color, fontSize: 10),
+                      ),
+                    );
+                  }),
                 ],
               ),
             ),

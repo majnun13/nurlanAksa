@@ -51,6 +51,10 @@ dependencies:
   # Google Sign-In
   google_sign_in: ^6.2.1
 
+  # Workout Session
+  flutter_ringtone_player: ^4.0.0   # Antrenman bitişinde sistem bildirim sesi
+  wakelock_plus: ^1.2.5             # Antrenman sırasında ekranı açık tut
+
 dev_dependencies:
   flutter_test:
     sdk: flutter

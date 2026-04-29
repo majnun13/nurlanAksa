@@ -123,3 +123,29 @@ CREATE TABLE IF NOT EXISTS meal_logs (
 
 CREATE INDEX IF NOT EXISTS idx_meal_logs_user_id ON meal_logs (user_id);
 CREATE INDEX IF NOT EXISTS idx_meal_logs_date ON meal_logs (user_id, (created_at::date));
+
+-- ─── daily_wearable_logs ───────────────────────────────────────
+-- Günlük giyilebilir cihaz verileri (adım, nabız, uyku vb.)
+-- Şu an seed scripti ile dolduruluyor.
+-- İleride HealthKit / Google Fit API entegrasyonuyla otomatik dolacak.
+CREATE TABLE IF NOT EXISTS daily_wearable_logs (
+    id               UUID        PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id          UUID        NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    log_date         DATE        NOT NULL DEFAULT CURRENT_DATE,
+
+    step_count       INT         DEFAULT 0,          -- Günlük adım sayısı
+    avg_hr_bpm       INT,                             -- Ortalama kalp atış hızı (bpm)
+    resting_hr_bpm   INT,                             -- Dinlenme kalp atış hızı (bpm)
+    sleep_hours      NUMERIC(4,1),                    -- Uyku süresi (saat)
+    sleep_score      INT,                             -- Uyku kalitesi 0-100
+    hrv_ms           INT,                             -- Kalp atış değişkenliği (ms)
+    spo2_pct         INT,                             -- Kan oksijen satürasyon yüzdesi
+    active_minutes   INT,                             -- Aktif dakika sayısı
+    calories_burned  INT,                             -- Yakılan kalori
+
+    created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+
+    UNIQUE(user_id, log_date)                         -- Günde bir kayıt
+);
+
+CREATE INDEX IF NOT EXISTS idx_wearable_user_date ON daily_wearable_logs (user_id, log_date DESC);

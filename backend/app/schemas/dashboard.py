@@ -19,6 +19,8 @@ class SleepHeartData(BaseModel):
     sleep_hours: float
     sleep_quality: float
     resting_hr: int
+    resting_hr_label: str = "Normal"
+    resting_hr_severity: str = "good"  # "good" | "warning" | "danger"
 
 class WeeklyChartData(BaseModel):
     days: List[str]

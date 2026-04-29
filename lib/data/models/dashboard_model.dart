@@ -94,11 +94,15 @@ class SleepHeartData {
   final double sleepHours;
   final double sleepQuality;
   final int restingHr;
+  final String restingHrLabel;
+  final String restingHrSeverity; // "good" | "warning" | "danger"
 
   SleepHeartData({
     required this.sleepHours,
     required this.sleepQuality,
     required this.restingHr,
+    this.restingHrLabel = 'Normal',
+    this.restingHrSeverity = 'good',
   });
 
   factory SleepHeartData.fromJson(Map<String, dynamic> json) {
@@ -106,6 +110,8 @@ class SleepHeartData {
       sleepHours: (json['sleep_hours'] ?? 0).toDouble(),
       sleepQuality: (json['sleep_quality'] ?? 0).toDouble(),
       restingHr: json['resting_hr'] ?? 0,
+      restingHrLabel: json['resting_hr_label'] ?? 'Normal',
+      restingHrSeverity: json['resting_hr_severity'] ?? 'good',
     );
   }
 }
