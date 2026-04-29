@@ -524,7 +524,7 @@ def _apply_wearable_adjustments(
 
     # ── 3. Yüksek Nabız → Düşük Darbeli Egzersiz ────────────
     # avg_hr > 88 iken normal moddaysa son egzersizi yüzme/yoga yap
-    if avg_hr > 88 and difficulty == "normal":
+    if avg_hr > 88 and difficulty == "normal" and exercise_keys:
         low_impact = "swimming" if "swimming" not in exercise_keys else "yoga"
         if low_impact not in exercise_keys:
             exercise_keys[-1] = low_impact
@@ -722,23 +722,32 @@ async def get_user_exercise_plan(user_id: str, difficulty: str = "normal") -> di
     except Exception as e:
         import traceback, logging
         logging.error(f"[ExerciseService] Beklenmedik hata: {e}\n{traceback.format_exc()}")
-        # Güvenli fallback plan — uygulama asla çökmez
-        wearable_fallback = {
-            "step_count": 5000, "avg_hr_today": 72, "resting_hr": 65,
-            "sleep_score": 70, "sleep_hours": 7.0, "hrv": 45,
-            "active_minutes": 30, "calories_burned": 300,
-            "recovery_score": 50, "has_real_data": False,
-        }
+
+        # Haftalık planı güvenle oluşturmayı dene (user_id hâlâ erişilebilir)
+        try:
+            fallback_plan = await _build_weekly_plan("maintain", user_id)
+        except Exception:
+            # DB de erişilemiyorsa statik şablon kullan
+            fallback_plan = [
+                {"day": d, "activity": a, "done": False}
+                for d, a in _WEEKLY_PLANS["maintain"]
+            ]
+
         return {
             "rationale": {
                 "title": "Kişisel Egzersiz Planı",
                 "description": "Verileriniz yüklenirken genel bir plan oluşturuldu.",
                 "tags": [{"label": "💪 Aktif"}, {"label": "❤️ Sağlıklı"}],
             },
-            "recommendations": _build_recommendations(["walking", "yoga"], "normal"),
+            "recommendations":   _build_recommendations(["walking", "yoga"], "normal"),
             "hr_zone":           calculate_hr_zones(30, "maintain"),
-            "weekly_plan":       _build_weekly_plan("maintain"),
+            "weekly_plan":       fallback_plan,
             "heart_rate_hourly": _simulate_heart_rate_hourly(65),
             "recovery_score":    50,
-            "weekly_stats":      {"total_minutes": 0, "total_calories": 0, "active_days": 0},
+            "weekly_stats": {
+                "total_active_minutes": 0,
+                "total_calories":       0,
+                "workouts_done":        0,
+                "streak_days":          0,
+            },
         }

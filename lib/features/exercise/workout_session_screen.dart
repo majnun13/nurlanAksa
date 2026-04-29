@@ -263,11 +263,11 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen>
       if (!mounted) return;
 
       if (isTooHard == true) {
-        // Zorluk tercihini kaydet → bir sonraki oturumda easy mod
+        // Kullanıcı zordu dedi → her zaman prefer_easy_mode = true yap
         final prefs = await SharedPreferences.getInstance();
         final prevCount = prefs.getInt('hard_quit_count') ?? 0;
         await prefs.setInt('hard_quit_count', prevCount + 1);
-        await prefs.setBool('prefer_easy_mode', prevCount + 1 >= 2);
+        await prefs.setBool('prefer_easy_mode', true);  // ← her zaman true
       }
 
       // Ekrana kalan süreyi ve tamamlama bilgisini döndür
@@ -280,7 +280,8 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen>
         ));
       }
     } else {
-      // İptal ettiyse timer'ı tekrar başlat
+      // İptal ettiyse timer'ı temizçe yeniden başlat
+      _timer?.cancel();
       _startTimer();
     }
   }
@@ -293,6 +294,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen>
       builder: (ctx) => _CompletionDialog(
         exerciseName: widget.exerciseName,
         exerciseIcon: widget.exerciseIcon,
+        exerciseType: widget.exerciseName,
         totalSeconds: _totalSeconds,
         accentColor: widget.accentColor,
         onClose: () {
@@ -730,13 +732,27 @@ class _TooHardDialog extends StatelessWidget {
 class _CompletionDialog extends StatelessWidget {
   final String exerciseName;
   final String exerciseIcon;
+  final String exerciseType;   // Tip bazlı kalori için
   final int totalSeconds;
   final Color accentColor;
   final VoidCallback onClose;
 
+  // Egzersiz tipine göre kcal/dakika (exercise_screen ile aynı)
+  static const Map<String, int> _kcalPerMin = {
+    'HIIT Kardiyo':        12,
+    'Güç Antrenmanı':        8,
+    'Bisiklet / Spinning':  7,
+    'Yüzme':                 9,
+    'Kalistenik':            6,
+    'Tempolu Yürüyüş':      4,
+    'Yoga & Esneme':         3,
+    'Aktif Dinlenme':        1,
+  };
+
   const _CompletionDialog({
     required this.exerciseName,
     required this.exerciseIcon,
+    required this.exerciseType,
     required this.totalSeconds,
     required this.accentColor,
     required this.onClose,
@@ -744,9 +760,9 @@ class _CompletionDialog extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final minutes = totalSeconds ~/ 60;
-    // Basit kalori tahmini: ~5 kcal/dk (ortalama)
-    final kcal = minutes * 5;
+    final minutes    = totalSeconds ~/ 60;
+    final kcalPerMin = _kcalPerMin[exerciseType] ?? 5;
+    final kcal       = minutes * kcalPerMin;
 
     return AlertDialog(
       backgroundColor: AksaColors.surface,

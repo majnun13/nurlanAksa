@@ -31,6 +31,7 @@ class WeeklyStats(BaseModel):
     total_active_minutes: int
     total_calories: int
     workouts_done: int
+    streak_days: int = 0
 
 class ExerciseResponse(BaseModel):
     rationale: RationaleData
