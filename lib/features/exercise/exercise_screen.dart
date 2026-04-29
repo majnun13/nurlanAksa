@@ -60,10 +60,12 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
 
     try {
       final data = await _repository.getExerciseSummary(difficulty: _difficulty);
-      setState(() {
-        _exerciseData = data;
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _exerciseData = data;
+          _isLoading = false;
+        });
+      }
     } catch (e) {
       if (mounted) {
         setState(() {
@@ -87,6 +89,9 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   Future<void> _handleWorkoutResult(
       WorkoutResult result, int recIndex) async {
     // ── Backend'e kaydet (B) ──────────────────────────────────
+    if (_exerciseData == null) return;
+    if (recIndex >= _exerciseData!.recommendations.length) return;
+
     final rec        = _exerciseData!.recommendations[recIndex];
     final kcalPerMin = _kcalPerMin[rec.type] ?? 5;
     final kcal       = (result.completedSeconds ~/ 60) * kcalPerMin;
@@ -112,17 +117,19 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
           }
           return e.value;
         }).toList();
-        setState(() {
-          _exerciseData = ExerciseModel(
-            rationale:       _exerciseData!.rationale,
-            recommendations: _exerciseData!.recommendations,
-            hrZone:          _exerciseData!.hrZone,
-            weeklyPlan:      updatedPlan,
-            heartRateHourly: _exerciseData!.heartRateHourly,
-            recoveryScore:   _exerciseData!.recoveryScore,
-            weeklyStats:     _exerciseData!.weeklyStats,
-          );
-        });
+        if (mounted) {
+          setState(() {
+            _exerciseData = ExerciseModel(
+              rationale:       _exerciseData!.rationale,
+              recommendations: _exerciseData!.recommendations,
+              hrZone:          _exerciseData!.hrZone,
+              weeklyPlan:      updatedPlan,
+              heartRateHourly: _exerciseData!.heartRateHourly,
+              recoveryScore:   _exerciseData!.recoveryScore,
+              weeklyStats:     _exerciseData!.weeklyStats,
+            );
+          });
+        }
       }
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -494,9 +501,11 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
 
   // ── Haftalık İstatistik Özet Kartı (H) ───────────────────────
   Widget _buildWeeklyStatsCard(BuildContext context, WeeklyStats stats) {
-    final streakLabel = stats.streakDays >= 7
-        ? '🔥 ${stats.streakDays} gün'
-        : '${stats.streakDays} gün';
+    final streakLabel = stats.streakDays == 0
+        ? 'Başla! 🚀'
+        : stats.streakDays >= 7
+            ? '🔥 ${stats.streakDays} gün'
+            : '${stats.streakDays} gün';
     return AksaCard(
       child: Row(
         mainAxisAlignment: MainAxisAlignment.spaceAround,
@@ -742,6 +751,11 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
   }
 
   Widget _buildHRChart(BuildContext context, List<double> hrs) {
+    if (hrs.isEmpty) {
+      return const SizedBox.shrink();
+    }
+    final minVal = (hrs.reduce((a, b) => a < b ? a : b) - 10).clamp(30.0, 60.0);
+    final maxVal = (hrs.reduce((a, b) => a > b ? a : b) + 10).clamp(100.0, 200.0);
     return AksaCard(
       padding: const EdgeInsets.fromLTRB(12, 20, 12, 12),
       child: SizedBox(
@@ -754,7 +768,7 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
                 tooltipRoundedRadius: 8,
                 getTooltipItems: (spots) => spots
                     .map((s) => LineTooltipItem(
-                          '${s.y.toInt()} bpm',
+                          '${s.y.toStringAsFixed(1)} bpm',
                           const TextStyle(
                               color: AksaColors.riskHigh,
                               fontWeight: FontWeight.w600,
@@ -798,8 +812,8 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
               topTitles:
                   const AxisTitles(sideTitles: SideTitles(showTitles: false)),
             ),
-            minY: 50,
-            maxY: 130,
+            minY: minVal,
+            maxY: maxVal,
             lineBarsData: [
               LineChartBarData(
                 spots: hrs
@@ -1001,6 +1015,7 @@ class _ExerciseCard extends StatelessWidget {
                         fontSize: 12,
                         height: 1.5)),
                 const SizedBox(height: 10),
+                if (rec.type != 'Aktif Dinlenme')
                 FilledButton.icon(
                   onPressed: () async {
                     final result = await Navigator.of(context).push<WorkoutResult>(

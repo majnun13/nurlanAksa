@@ -65,7 +65,7 @@ _EX = {
     },
     "hiit": {
         "icon": "⚡", "type": "HIIT Kardiyo",
-        "duration":  {"normal": "1 dk", "easy": "1 dk"},
+        "duration":  {"normal": "20 dk", "easy": "12 dk"},
         "intensity": {"normal": "Yüksek Yoğunluk", "easy": "Orta Yoğunluk"},
         "desc": {
             "normal": "Yüksek yoğunluklu interval antrenman. 40 sn çalış / 20 sn dinlen formatında.",
@@ -229,7 +229,7 @@ def _apply_age_adjustments(
         if not exercise_keys:
             exercise_keys = ["walking", "swimming"]
     elif age >= 50:
-        # HIIT öı en sona al (var sa)
+        # HIIT öğesini en sona al (var sa)
         if "hiit" in exercise_keys and len(exercise_keys) > 1:
             exercise_keys = [e for e in exercise_keys if e != "hiit"] + ["hiit"]
 
@@ -288,10 +288,10 @@ async def _build_weekly_plan(health_goal: str, user_id: str) -> list[dict]:
             SELECT log_date FROM daily_wearable_logs
             WHERE user_id = $1
               AND log_date >= $2
-              AND log_date <  $3
+              AND log_date <= $3      -- bugün dahil: antrenman tamamlanınca done görünür
               AND active_minutes > 0
             """,
-            user_id, week_start, today,   # bugünü dışla (yarım sayılmaz)
+            user_id, week_start, today,
         )
         active_weekdays = {r["log_date"].weekday() for r in rows}
     except Exception:
@@ -357,8 +357,9 @@ async def _get_weekly_stats(user_id: str) -> dict:
                 "workouts_done":        row["workout_days"],
                 "streak_days":          streak,
             }
-    except Exception:
-        pass
+    except Exception as ex:
+        import logging
+        logging.warning(f"[ExerciseService] _get_weekly_stats hata: {ex}")
     return {"total_active_minutes": 0, "total_calories": 0, "workouts_done": 0, "streak_days": 0}
 
 
@@ -432,10 +433,11 @@ async def _get_wearable_context(user_id: str, age: int = 30) -> dict:
                sleep_score, hrv_ms, active_minutes, calories_burned
         FROM daily_wearable_logs
         WHERE user_id = $1
+          AND log_date >= $2         -- son 7 gün: stale veri önle
         ORDER BY log_date DESC
         LIMIT 1
         """,
-        user_id,
+        user_id, today - datetime.timedelta(days=7),
     )
 
     # Dünün aktiflik verisi (yorgunluk penaltısı için)
@@ -459,8 +461,9 @@ async def _get_wearable_context(user_id: str, age: int = 30) -> dict:
             "sleep_score":    sleep_score,
             "sleep_hours":    float(row["sleep_hours"] or 7.0),
             "hrv":            hrv,
-            "active_minutes": row["active_minutes"]  or 30,
-            "calories_burned":row["calories_burned"] or 300,
+            # 0 meşru bir değer (dinlenme günü); None ise varsayılan kullan
+            "active_minutes": row["active_minutes"]  if row["active_minutes"] is not None else 30,
+            "calories_burned":row["calories_burned"] if row["calories_burned"] is not None else 300,
             "recovery_score": _calc_recovery(
                 sleep_score, hrv, avg_hr, age, prev_active
             ),

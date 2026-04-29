@@ -98,26 +98,33 @@ async def complete_workout_session(
     # Frontend değeri 0 ise backend değerini, değilse ikisinin büyüğünü al
     final_kcal = max(body.calories_burned, computed_kcal)
 
-    # UPSERT — günlük toplam üzerine ekle
-    await pool.execute(
-        """
-        INSERT INTO daily_wearable_logs (user_id, log_date, active_minutes, calories_burned)
-        VALUES ($1, $2, $3, $4)
-        ON CONFLICT (user_id, log_date) DO UPDATE
-        SET active_minutes  = daily_wearable_logs.active_minutes  + EXCLUDED.active_minutes,
-            calories_burned = daily_wearable_logs.calories_burned + EXCLUDED.calories_burned
-        """,
-        user_id, today, duration_minutes, final_kcal,
-    )
+    try:
+        # UPSERT — günlük toplam üzerine ekle
+        await pool.execute(
+            """
+            INSERT INTO daily_wearable_logs (user_id, log_date, active_minutes, calories_burned)
+            VALUES ($1, $2, $3, $4)
+            ON CONFLICT (user_id, log_date) DO UPDATE
+            SET active_minutes  = daily_wearable_logs.active_minutes  + EXCLUDED.active_minutes,
+                calories_burned = daily_wearable_logs.calories_burned + EXCLUDED.calories_burned
+            """,
+            user_id, today, duration_minutes, final_kcal,
+        )
 
-    # Güncel toplam değerleri al (response için)
-    row = await pool.fetchrow(
-        "SELECT active_minutes, calories_burned FROM daily_wearable_logs "
-        "WHERE user_id=$1 AND log_date=$2",
-        user_id, today,
-    )
-    new_minutes  = int(row["active_minutes"])  if row else duration_minutes
-    new_calories = int(row["calories_burned"]) if row else final_kcal
+        # Güncel toplam değerleri al (response için)
+        row = await pool.fetchrow(
+            "SELECT active_minutes, calories_burned FROM daily_wearable_logs "
+            "WHERE user_id=$1 AND log_date=$2",
+            user_id, today,
+        )
+        new_minutes  = int(row["active_minutes"])  if row else duration_minutes
+        new_calories = int(row["calories_burned"]) if row else final_kcal
+
+    except Exception as e:
+        import logging, traceback
+        logging.error(f"[Exercise] complete-session DB hatası: {e}\n{traceback.format_exc()}")
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Antrenman kaydedilemedi, lütfen tekrar deneyin.")
 
     status = "tamamlandı" if body.completed else "yarıda bırakıldı"
     return CompleteSessionResponse(

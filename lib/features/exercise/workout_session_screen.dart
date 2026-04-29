@@ -118,6 +118,7 @@ class _WorkoutSessionScreenState extends State<WorkoutSessionScreen>
 
   // ── Yardımcı: "30 dk" → 1800 saniye ─────────────────────────
   int _parseDuration(String str) {
+    if (str == '—' || str == '-' || str.trim().isEmpty) return 0;
     final match = RegExp(r'(\d+)').firstMatch(str);
     final minutes = match != null ? int.parse(match.group(1)!) : 20;
     return minutes * 60;
