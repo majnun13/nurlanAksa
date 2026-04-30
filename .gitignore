@@ -47,6 +47,7 @@ app.*.map.json
 # 1. Çevre Değişkenleri ve Sırlar (Şifreler)
 .env
 .env.*
+!.env.example          # örnek şablon dosyası – güvende paylaş
 *.local
 credentials.json
 client_secret.json
