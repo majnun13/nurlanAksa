@@ -44,20 +44,37 @@ class ApiClient {
     )..interceptors.add(
         InterceptorsWrapper(
           onRequest: (options, handler) async {
-            // Önce önbellekteki prefs'i kullan (hızlı, race condition yok)
+            // Her istekte SharedPreferences'tan token'ı taze oku
             final prefs = _prefs ?? await SharedPreferences.getInstance();
+            _prefs = prefs; // önbelleği güncelle
             final token = prefs.getString(_tokenKey);
-            if (token != null) {
+            if (token != null && token.isNotEmpty) {
               options.headers['Authorization'] = 'Bearer $token';
             }
             handler.next(options);
           },
-          onError: (error, handler) {
-            // 401 → token sil
-            if (error.response?.statusCode == 401) {
-              _prefs?.remove(_tokenKey);
-              SharedPreferences.getInstance()
-                  .then((p) => p.remove(_tokenKey));
+          onError: (DioException error, handler) async {
+            // 401 gelirse → token'ı silmeden önce RETRY yap
+            // Sunucu restart sonrası race condition'dan korur
+            if (error.response?.statusCode == 401 &&
+                error.requestOptions.extra['_retried'] != true) {
+              // Token hâlâ geçerli mi diye bir kez daha dene
+              final prefs = _prefs ?? await SharedPreferences.getInstance();
+              final token = prefs.getString(_tokenKey);
+              if (token != null && token.isNotEmpty) {
+                // Token varsa, isteği token ekleyerek tekrar gönder
+                final opts = error.requestOptions;
+                opts.headers['Authorization'] = 'Bearer $token';
+                opts.extra['_retried'] = true;
+                try {
+                  final response = await _dio!.fetch(opts);
+                  return handler.resolve(response);
+                } catch (_) {
+                  // Retry de 401 verdiyse token gerçekten geçersiz → sil
+                  await prefs.remove(_tokenKey);
+                  _prefs = prefs;
+                }
+              }
             }
             handler.next(error);
           },
@@ -92,8 +109,22 @@ class ApiClient {
     return prefs.getString(_tokenKey);
   }
 
-  // ── Hata mesajı çıkar ─────────────────────────────────────
+  // ── Hata mesajı çıkar ───────────────────────────────────────────────────
   static String extractError(DioException e) {
+    // Ağ bağlantısı hatası
+    if (e.type == DioExceptionType.connectionTimeout ||
+        e.type == DioExceptionType.receiveTimeout ||
+        e.type == DioExceptionType.connectionError) {
+      return 'Sunucuya ulaşılamadı. Uygulamanın şu anda açık olduğundan emin olun.';
+    }
+
+    final status = e.response?.statusCode;
+    if (status == 401) return 'Oturum süreniz dolmuş. Lütfen tekrar giriş yapın.';
+    if (status == 403) return 'Bu işleme yetkiniz yok.';
+    if (status == 404) return 'İstenen kaynak bulunamadı.';
+    if (status == 422) return 'Geçersiz istek. Lütfen bilgilerinizi kontrol edin.';
+    if (status != null && status >= 500) return 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.';
+
     if (e.response?.data is! Map) {
        return 'Bir hata oluştu. Lütfen tekrar deneyin.';
     }

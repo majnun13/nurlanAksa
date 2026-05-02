@@ -11,6 +11,7 @@ from app.schemas.dashboard import (
     WeeklyChartData,
     RecommendationItem,
 )
+from app.services.anomaly_service import anomaly_service
 
 router = APIRouter(prefix="/dashboard", tags=["Dashboard"])
 
@@ -181,8 +182,15 @@ def _calc_risk_score(wearable: dict, profile: dict) -> int:
     # Kronik hastalık
     conditions = profile.get("medical_conditions") or []
     score += min(len(conditions) * 8, 20)
+    
+    # ML Anomali Skoru Katkısı (Modül 3 Fusion)
+    # Anomali servisinden dönen 0-100 arası skoru %25 ağırlıkla ekle
+    anom_res = anomaly_service.evaluate_wearable_data(wearable)
+    ml_anomaly_score = anom_res.get("score", 0.0)
+    
+    score += ml_anomaly_score * 0.25
 
-    return max(0, min(100, score))
+    return max(0, min(100, int(score)))
 
 
 def _build_recommendations(wearable: dict, profile: dict) -> list:
@@ -234,26 +242,13 @@ def _build_recommendations(wearable: dict, profile: dict) -> list:
 
 
 def _anomaly_from_wearable(wearable: dict) -> AnomalyData:
-    avg_hr   = wearable.get("avg_hr_bpm")  or _WEARABLE_DEFAULTS["avg_hr_bpm"]
-    sleep_sc = wearable.get("sleep_score") or _WEARABLE_DEFAULTS["sleep_score"]
-    hrv      = wearable.get("hrv_ms")      or _WEARABLE_DEFAULTS["hrv_ms"]
-    spo2     = wearable.get("spo2_pct")    or _WEARABLE_DEFAULTS["spo2_pct"]
-
-    if spo2 < 94:
-        return AnomalyData(has_anomaly=True, level="Yüksek",
-            message=f"Kan oksijen seviyeniz ({spo2}%) düşük. Bir sağlık uzmanına danışın.")
-    if avg_hr > 100:
-        return AnomalyData(has_anomaly=True, level="Orta",
-            message=f"Bugünkü ortalama nabzınız ({avg_hr} bpm) yüksek. Dinlenin ve bol su için.")
-    if sleep_sc < 35:
-        return AnomalyData(has_anomaly=True, level="Orta",
-            message="Uyku kaliteniz kritik seviyede düşük. Bu gece erken uyumayı öneririz.")
-    if hrv < 25:
-        return AnomalyData(has_anomaly=True, level="Düşük",
-            message="HRV değeriniz düşük, vücudunuz yorgun. Bugün hafif aktiviteler tercih edin.")
-
-    return AnomalyData(has_anomaly=False, level="Düşük",
-        message="Her şey yolunda görünüyor. Kalp ritminiz ve uyku düzeniniz stabil.")
+    # Eski kural tabanlı yapıyı yeni ML servisine yönlendir
+    result = anomaly_service.evaluate_wearable_data(wearable)
+    return AnomalyData(
+        has_anomaly=result["has_anomaly"],
+        level=result["level"],
+        message=result["message"]
+    )
 
 
 @router.get("/summary", response_model=DashboardResponse)
