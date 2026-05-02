@@ -10,7 +10,7 @@ import 'legal_screens.dart';
 import 'edit_profile_screen.dart';
 import '../../core/network/api_client.dart';
 import '../../core/services/wearable_sync_service.dart';
-import '../../core/services/health_connect_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -46,8 +46,11 @@ class SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSyncStatus() async {
-    // Gerçek HealthKit bağlantı durumu
-    final isConnected = await HealthConnectService.instance.checkAuthorization();
+    // iOS'ta hasPermissions() her zaman null döndürür (Apple gizlilik kuralı).
+    // Bunun yerine son sync zamanını kontrol ederek bağlı olup olmadığına karar veririz.
+    final prefs = await SharedPreferences.getInstance();
+    final lastSync = prefs.getString('last_wearable_sync');
+    final isConnected = lastSync != null; // en az bir kez sync olduysa bağlı sayılır
     final label = await WearableSyncService.getLastSyncLabel();
     if (mounted) {
       setState(() {
