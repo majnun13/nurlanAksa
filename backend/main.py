@@ -11,6 +11,7 @@ from app.api.routes import profile as profile_router
 from app.api.routes import dashboard as dashboard_router
 from app.api.routes import exercise as exercise_router
 from app.api.routes import nutrition as nutrition_router
+from app.api.routes import wearable as wearable_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Uygulama başlangıcında bağlantı havuzu oluştur
@@ -53,6 +54,7 @@ app.include_router(profile_router.router, prefix="/api/v1")
 app.include_router(dashboard_router.router, prefix="/api/v1")
 app.include_router(exercise_router.router, prefix="/api/v1")
 app.include_router(nutrition_router.router, prefix="/api/v1")
+app.include_router(wearable_router.router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Health"])

@@ -6,6 +6,7 @@ import '../../app/theme.dart';
 import '../../data/models/dashboard_model.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../core/network/api_client.dart';
+import '../../core/services/wearable_sync_service.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -28,6 +29,10 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> _loadDashboardData() async {
+    // Önce Apple Health verilerini backend'e gönder (gerçek risk skoru için)
+    // Hata olursa sessizce devam et – dashboard yine de yüklenir
+    await WearableSyncService.instance.syncNow();
+
     try {
       final data = await _repository.getDashboardSummary();
       setState(() {

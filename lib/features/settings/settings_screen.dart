@@ -9,6 +9,8 @@ import '../auth/login_screen.dart';
 import 'legal_screens.dart';
 import 'edit_profile_screen.dart';
 import '../../core/network/api_client.dart';
+import '../../core/services/wearable_sync_service.dart';
+import '../../core/services/health_connect_service.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -29,16 +31,30 @@ class SettingsScreenState extends State<SettingsScreen> {
   bool _isLoading = true;
 
   String _userName = 'Kullanıcı';
+  String _lastSyncLabel = 'Bağlı değil';
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _loadSyncStatus();
     ApiClient.getUserName().then((val) {
       if (val != null && mounted) {
         setState(() => _userName = val);
       }
     });
+  }
+
+  Future<void> _loadSyncStatus() async {
+    // Gerçek HealthKit bağlantı durumu
+    final isConnected = await HealthConnectService.instance.checkAuthorization();
+    final label = await WearableSyncService.getLastSyncLabel();
+    if (mounted) {
+      setState(() {
+        _healthKitConnected = isConnected;
+        _lastSyncLabel = isConnected ? label : 'Bağlı değil';
+      });
+    }
   }
 
   Future<void> _loadProfile() async {
@@ -370,7 +386,7 @@ class SettingsScreenState extends State<SettingsScreen> {
           name: 'Google Fit',
           status: _googleFitConnected ? 'Bağlı' : 'Bağlı Değil',
           isConnected: _googleFitConnected,
-          lastSync: _googleFitConnected ? 'Son sync: 2 dk önce' : 'Bağlı değil',
+          lastSync: _googleFitConnected ? _lastSyncLabel : 'Bağlı değil',
           onToggle: () =>
               setState(() => _googleFitConnected = !_googleFitConnected),
         ),
@@ -380,7 +396,7 @@ class SettingsScreenState extends State<SettingsScreen> {
           name: 'Apple HealthKit',
           status: _healthKitConnected ? 'Bağlı' : 'Bağlı Değil',
           isConnected: _healthKitConnected,
-          lastSync: _healthKitConnected ? 'Son sync: 5 dk önce' : 'Bağlı değil',
+          lastSync: _healthKitConnected ? _lastSyncLabel : 'Bağlı değil',
           onToggle: () =>
               setState(() => _healthKitConnected = !_healthKitConnected),
         ),
