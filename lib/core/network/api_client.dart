@@ -22,7 +22,7 @@ class ApiClient {
       return 'http://10.0.2.2:8000';
     }
     // Gerçek iPhone cihazının Mac'teki sunucuya bağlanabilmesi için Mac'in Wi-Fi / Hotspot IP'si:
-    return 'http://192.168.1.101:8000';
+    return 'http://192.168.1.86:8000';
   }
 
   static Dio? _dio;
