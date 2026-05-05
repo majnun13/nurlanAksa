@@ -27,6 +27,7 @@ class WearableSyncService {
     HealthDataType.ACTIVE_ENERGY_BURNED,
     HealthDataType.SLEEP_ASLEEP,
     HealthDataType.SLEEP_IN_BED,
+    HealthDataType.RESTING_HEART_RATE,
   ];
 
   /// Son senkronizasyon zamanını döner (human-readable)
@@ -95,6 +96,7 @@ class WearableSyncService {
 
       // Ortalama kalp atış hızı
       double? avgHr;
+      int? lastHr;
       try {
         final hrData = await _health.getHealthDataFromTypes(
           types: [HealthDataType.HEART_RATE],
@@ -102,11 +104,18 @@ class WearableSyncService {
           endTime: now,
         );
         if (hrData.isNotEmpty) {
-          final vals = hrData
-              .map((d) =>
-                  (d.value as NumericHealthValue).numericValue.toDouble())
-              .toList();
-          avgHr = vals.reduce((a, b) => a + b) / vals.length;
+          // Önce Apple Watch verilerini filtrele
+          final watchData = hrData.where((d) => d.sourceName.toLowerCase().contains('watch')).toList();
+          final dataToUse = watchData.isNotEmpty ? watchData : hrData;
+
+          if (dataToUse.isNotEmpty) {
+            final vals = dataToUse
+                .map((d) =>
+                    (d.value as NumericHealthValue).numericValue.toDouble())
+                .toList();
+            avgHr = vals.reduce((a, b) => a + b) / vals.length;
+            lastHr = (dataToUse.last.value as NumericHealthValue).numericValue.toInt();
+          }
         }
       } catch (_) {}
 
@@ -141,7 +150,43 @@ class WearableSyncService {
       }
       if (avgHr != null && avgHr > 0) {
         payload['avg_hr_bpm'] = avgHr.round();
-        payload['resting_hr_bpm'] = (avgHr * 0.85).round();
+      }
+
+      // Resting HR — Apple Watch varsa doğrudan oku, yoksa avgHr'den tahmin et
+      int? restingHr;
+      try {
+        final restingData = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.RESTING_HEART_RATE],
+          startTime: midnight,
+          endTime: now,
+        );
+        if (restingData.isNotEmpty) {
+          // Önce Apple Watch verilerini filtrele
+          final watchData = restingData.where((d) => d.sourceName.toLowerCase().contains('watch')).toList();
+          final dataToUse = watchData.isNotEmpty ? watchData : restingData;
+          
+          if (dataToUse.isNotEmpty) {
+            // En son resting HR değerini al
+            final lastResting = dataToUse.last;
+            restingHr = (lastResting.value as NumericHealthValue)
+                .numericValue
+                .toInt();
+          }
+        }
+      } catch (_) {}
+
+      // 1. Fallback: Apple Watch yoksa, son HEART_RATE ölçümünü resting HR kabul et
+      if (restingHr == null && lastHr != null) {
+        restingHr = lastHr;
+      }
+
+      // 2. Fallback: Eğer hiçbiri yoksa avgHr'den kaba tahmin
+      if (restingHr == null && avgHr != null && avgHr > 0) {
+        restingHr = (avgHr * 0.85).round();
+      }
+
+      if (restingHr != null && restingHr > 0) {
+        payload['resting_hr_bpm'] = restingHr;
       }
       if (sleepHours > 0) {
         payload['sleep_hours'] = double.parse(sleepHours.toStringAsFixed(1));

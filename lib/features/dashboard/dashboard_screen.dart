@@ -7,6 +7,8 @@ import '../../data/models/dashboard_model.dart';
 import '../../data/repositories/dashboard_repository.dart';
 import '../../core/network/api_client.dart';
 import '../../core/services/wearable_sync_service.dart';
+import '../../core/services/notification_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -20,6 +22,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
   DashboardModel? _dashboardData;
   bool _isLoading = true;
   String? _error;
+  bool _showAnomalyAlerts = true;
 
   @override
   void initState() {
@@ -34,17 +37,36 @@ class _DashboardScreenState extends State<DashboardScreen> {
     await WearableSyncService.instance.syncNow();
 
     try {
+      final prefs = await SharedPreferences.getInstance();
       final data = await _repository.getDashboardSummary();
-      setState(() {
-        _dashboardData = data;
-        _isLoading = false;
-        _error = null;
-      });
+      
+      // Anomali bildirimi (Eğer yeni bir anomali ise anlık bildirim at)
+      if (data.anomaly.hasAnomaly && (prefs.getBool('pref_anomaly_alerts') ?? true)) {
+        final lastMsg = prefs.getString('last_anomaly_msg');
+        if (lastMsg != data.anomaly.message) {
+          NotificationService().showInstantNotification(
+            title: '⚠️ Sağlık Uyarısı: ${data.anomaly.level} Risk',
+            body: data.anomaly.message,
+          );
+          await prefs.setString('last_anomaly_msg', data.anomaly.message);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _dashboardData = data;
+          _showAnomalyAlerts = prefs.getBool('pref_anomaly_alerts') ?? true;
+          _isLoading = false;
+          _error = null;
+        });
+      }
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _error = e.toString();
+          _isLoading = false;
+        });
+      }
     }
   }
 
@@ -99,29 +121,6 @@ class _DashboardScreenState extends State<DashboardScreen> {
         title: 'AKSA',
         showLogo: true,
         subtitle: _greeting(data.userName),
-        trailing: Stack(
-          clipBehavior: Clip.none,
-          children: [
-            IconButton(
-              onPressed: () {},
-              icon: const Icon(Icons.notifications_outlined,
-                  color: AksaColors.textPrimary),
-            ),
-            if (data.anomaly.hasAnomaly)
-              Positioned(
-                right: 8,
-                top: 8,
-                child: Container(
-                  width: 8,
-                  height: 8,
-                  decoration: const BoxDecoration(
-                    color: AksaColors.riskHigh,
-                    shape: BoxShape.circle,
-                  ),
-                ),
-              ),
-          ],
-        ),
       ),
       body: RefreshIndicator(
         onRefresh: _loadDashboardData,
@@ -129,7 +128,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             // ── Anomaly Banner
-            if (data.anomaly.hasAnomaly) _buildAnomalyBanner(context, data.anomaly),
+            if (data.anomaly.hasAnomaly && _showAnomalyAlerts) 
+              _buildAnomalyBanner(context, data.anomaly),
 
             // ── Risk Score Card
             _buildRiskScoreCard(context, data.risk),
@@ -434,8 +434,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
           _ActivityProgressTile(
             icon: Icons.route_outlined,
             label: 'Mesafe',
-            value: (activity.distanceKm * 10).round(),
-            goal: 80,
+            value: activity.distanceKm,
+            goal: 5.0,
             unit: 'km',
             color: AksaColors.accent,
             displayValue: activity.distanceKm.toStringAsFixed(1),
@@ -496,7 +496,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ClipRRect(
                     borderRadius: BorderRadius.circular(999),
                     child: LinearProgressIndicator(
-                      value: sleepHeart.sleepQuality,
+                      value: (sleepHeart.sleepHours / 8.0).clamp(0.0, 1.0),
                       minHeight: 4,
                       backgroundColor:
                           const Color(0xFF7C3AED).withOpacity(0.1),
@@ -505,7 +505,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    'Kalite: %${(sleepHeart.sleepQuality * 100).round()}',
+                    'Hedef: 8 sa / %${((sleepHeart.sleepHours / 8.0).clamp(0.0, 1.0) * 100).round()}',
                     style: const TextStyle(
                         color: AksaColors.textMuted, fontSize: 11),
                   ),
@@ -760,8 +760,8 @@ class _ActivityProgressTile extends StatelessWidget {
 
   final IconData icon;
   final String label;
-  final int value;
-  final int goal;
+  final num value;
+  final num goal;
   final String unit;
   final Color color;
   final String? displayValue;

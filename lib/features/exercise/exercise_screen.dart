@@ -279,13 +279,6 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
               ),
             ),
 
-            // ── HR Target Zone
-            const SectionHeader('Hedef Kalp Atış Hızı Bölgesi'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _buildHRZoneCard(context, data.hrZone),
-            ),
-
             // ── Haftalık Özet İstatistik (H)
             const SectionHeader('Bu Haftaki Aktivite',
                 subtitle: 'Pazartesiden bugüne'),
@@ -300,14 +293,6 @@ class _ExerciseScreenState extends State<ExerciseScreen> {
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
               child: _buildWeeklyPlan(context, data.weeklyPlan),
-            ),
-
-            // ── Heart Rate 24h Chart
-            const SectionHeader('Kalp Atış Hızı – 24 Saat',
-                subtitle: 'Bugünkü HR dağılımı'),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: _buildHRChart(context, data.heartRateHourly),
             ),
           ],
         ),

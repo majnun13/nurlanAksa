@@ -193,7 +193,7 @@ def _calc_risk_score(wearable: dict, profile: dict) -> int:
     return max(0, min(100, int(score)))
 
 
-def _build_recommendations(wearable: dict, profile: dict) -> list:
+def _build_recommendations(wearable: dict, profile: dict, steps_goal: int) -> list:
     recs = []
     steps    = wearable.get("step_count")    or _WEARABLE_DEFAULTS["step_count"]
     sleep_sc = wearable.get("sleep_score")   or _WEARABLE_DEFAULTS["sleep_score"]
@@ -201,15 +201,15 @@ def _build_recommendations(wearable: dict, profile: dict) -> list:
     hrv      = wearable.get("hrv_ms")        or _WEARABLE_DEFAULTS["hrv_ms"]
     goal     = profile.get("health_goal")    or _PROFILE_DEFAULTS["health_goal"]
 
-    if steps < 5000:
+    if steps < steps_goal / 2:
         recs.append(RecommendationItem(type="exercise",
-            text=f"Bugün sadece {steps:,} adım attınız. Hedef 10.000 için kısa bir yürüyüş yapın."))
-    elif steps > 10000:
+            text=f"Bugün sadece {steps:,} adım attınız. Hedef {steps_goal:,} için kısa bir yürüyüş yapın."))
+    elif steps >= steps_goal:
         recs.append(RecommendationItem(type="exercise",
-            text=f"Harika! Bugün {steps:,} adım attınız. Aktif kalmaya devam edin! 🎉"))
+            text=f"Harika! Bugün {steps:,} adım atarak {steps_goal:,} hedefini geçtiniz! 🎉"))
     else:
         recs.append(RecommendationItem(type="exercise",
-            text=f"Bugün {steps:,} adım attınız. Hedefinize ulaşmak için biraz daha yürüyün."))
+            text=f"Bugün {steps:,} adım attınız. {steps_goal:,} hedefine ulaşmak için biraz daha yürüyün."))
 
     if sleep_sc < 50:
         recs.append(RecommendationItem(type="sleep",
@@ -339,9 +339,9 @@ async def get_dashboard_summary(authorization: str = Header(...)):
 
         # ── Adım hedefi (lifestyle'a göre) ───────────────────────
         lifestyle      = profile["lifestyle"]
-        steps_goal     = {"Sedanter": 7500, "Orta": 10000, "Aktif": 12000}.get(lifestyle, 10000)
-        calories_goal  = {"Sedanter": 400,  "Orta": 600,   "Aktif": 800}.get(lifestyle, 600)
-        active_goal    = {"Sedanter": 30,   "Orta": 45,    "Aktif": 60}.get(lifestyle, 45)
+        steps_goal     = {"Sedanter": 5000, "Orta": 7000, "Aktif": 10000}.get(lifestyle, 7000)
+        calories_goal  = {"Sedanter": 300,  "Orta": 500,  "Aktif": 700}.get(lifestyle, 500)
+        active_goal    = {"Sedanter": 20,   "Orta": 30,   "Aktif": 45}.get(lifestyle, 30)
 
         step_count      = wearable["step_count"]
         distance_km     = round(step_count * 0.0007, 1)
@@ -383,7 +383,7 @@ async def get_dashboard_summary(authorization: str = Header(...)):
                 days=weekly_days,
                 steps=weekly_steps,
             ),
-            recommendations=_build_recommendations(wearable, profile),
+            recommendations=_build_recommendations(wearable, profile, steps_goal),
         )
 
     except HTTPException:

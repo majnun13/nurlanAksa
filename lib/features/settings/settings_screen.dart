@@ -10,7 +10,9 @@ import 'legal_screens.dart';
 import 'edit_profile_screen.dart';
 import '../../core/network/api_client.dart';
 import '../../core/services/wearable_sync_service.dart';
+import '../../core/services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:io' show Platform;
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -38,11 +40,28 @@ class SettingsScreenState extends State<SettingsScreen> {
     super.initState();
     _loadProfile();
     _loadSyncStatus();
+    _loadNotificationPrefs();
     ApiClient.getUserName().then((val) {
       if (val != null && mounted) {
         setState(() => _userName = val);
       }
     });
+  }
+
+  Future<void> _loadNotificationPrefs() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _notifications = prefs.getBool('pref_notifications') ?? true;
+        _anomalyAlerts = prefs.getBool('pref_anomaly_alerts') ?? true;
+        _weeklyReport = prefs.getBool('pref_weekly_report') ?? false;
+      });
+    }
+  }
+
+  Future<void> _setNotificationPref(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
   }
 
   Future<void> _loadSyncStatus() async {
@@ -142,7 +161,10 @@ class SettingsScreenState extends State<SettingsScreen> {
                           title: 'Bildirimler',
                           subtitle: 'Genel uygulama bildirimleri',
                           value: _notifications,
-                          onChanged: (v) => setState(() => _notifications = v),
+                          onChanged: (v) {
+                            setState(() => _notifications = v);
+                            _setNotificationPref('pref_notifications', v);
+                          },
                           showDivider: true,
                         ),
                         _SwitchTile(
@@ -151,7 +173,10 @@ class SettingsScreenState extends State<SettingsScreen> {
                           title: 'Anomali Uyarıları',
                           subtitle: 'Anormal veri tespitinde anında bildir',
                           value: _anomalyAlerts,
-                          onChanged: (v) => setState(() => _anomalyAlerts = v),
+                          onChanged: (v) {
+                            setState(() => _anomalyAlerts = v);
+                            _setNotificationPref('pref_anomaly_alerts', v);
+                          },
                           showDivider: true,
                         ),
                         _SwitchTile(
@@ -160,9 +185,27 @@ class SettingsScreenState extends State<SettingsScreen> {
                           title: 'Haftalık Rapor',
                           subtitle: 'Her Pazar haftalık özet e-postası',
                           value: _weeklyReport,
-                          onChanged: (v) => setState(() => _weeklyReport = v),
+                          onChanged: (v) {
+                            setState(() => _weeklyReport = v);
+                            _setNotificationPref('pref_weekly_report', v);
+                          },
                           showDivider: false,
                         ),
+                      ],
+                    ),
+                  ),
+                ),
+
+                const SectionHeader('Öğün Hatırlatıcıları', subtitle: 'Beslenme bildirimleri için saatler'),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: AksaCard(
+                    padding: const EdgeInsets.all(0),
+                    child: Column(
+                      children: [
+                        _MealTimeTile(title: 'Kahvaltı Zamanı', prefKey: 'pref_breakfast_time', defaultTime: '09:00', showDivider: true),
+                        _MealTimeTile(title: 'Öğle Yemeği', prefKey: 'pref_lunch_time', defaultTime: '13:30', showDivider: true),
+                        _MealTimeTile(title: 'Akşam Yemeği', prefKey: 'pref_dinner_time', defaultTime: '19:00', showDivider: false),
                       ],
                     ),
                   ),
@@ -395,13 +438,54 @@ class SettingsScreenState extends State<SettingsScreen> {
         ),
         const SizedBox(height: 10),
         _WearableTile(
-          logo: '⬜',
-          name: 'Apple HealthKit',
+          logo: Platform.isIOS ? '❤️' : '💙',
+          name: Platform.isIOS ? 'Apple HealthKit' : 'Google Fit',
           status: _healthKitConnected ? 'Bağlı' : 'Bağlı Değil',
           isConnected: _healthKitConnected,
           lastSync: _healthKitConnected ? _lastSyncLabel : 'Bağlı değil',
-          onToggle: () =>
-              setState(() => _healthKitConnected = !_healthKitConnected),
+          onToggle: () async {
+            if (_healthKitConnected) {
+              // Bağlantıyı kes — SharedPreferences'tan sync bilgisini sil
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.remove('last_wearable_sync');
+              if (mounted) {
+                setState(() {
+                  _healthKitConnected = false;
+                  _lastSyncLabel = 'Bağlı değil';
+                });
+              }
+            } else {
+              // Bağlan — İzin iste ve sync başlat
+              final success = await WearableSyncService.instance.syncNow();
+              if (mounted) {
+                setState(() {
+                  _healthKitConnected = success;
+                });
+                if (success) {
+                  await _loadSyncStatus();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text(Platform.isIOS ? '✅ Apple HealthKit bağlandı!' : '✅ Google Fit bağlandı!'),
+                      backgroundColor: AksaColors.riskLow,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: const Text('⚠️ Sağlık verisi bağlantısı başarısız. İzinleri kontrol edin.'),
+                      backgroundColor: AksaColors.riskMedium,
+                      behavior: SnackBarBehavior.floating,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                    ),
+                  );
+                }
+              }
+            }
+          },
         ),
       ],
     );
@@ -909,6 +993,103 @@ class _MenuTile extends StatelessWidget {
               color: AksaColors.textMuted, size: 20),
         ),
         if (showDivider) const Divider(height: 1, indent: 56, endIndent: 16),
+      ],
+    );
+  }
+}
+
+class _MealTimeTile extends StatefulWidget {
+  const _MealTimeTile({
+    required this.title,
+    required this.prefKey,
+    required this.defaultTime,
+    required this.showDivider,
+  });
+
+  final String title;
+  final String prefKey;
+  final String defaultTime;
+  final bool showDivider;
+
+  @override
+  State<_MealTimeTile> createState() => _MealTimeTileState();
+}
+
+class _MealTimeTileState extends State<_MealTimeTile> {
+  String _time = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadTime();
+  }
+
+  Future<void> _loadTime() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _time = prefs.getString(widget.prefKey) ?? widget.defaultTime;
+    });
+  }
+
+  Future<void> _pickTime() async {
+    final parts = _time.split(':');
+    final initialTime = TimeOfDay(
+      hour: int.tryParse(parts[0]) ?? 9,
+      minute: int.tryParse(parts[1]) ?? 0,
+    );
+    final selected = await showTimePicker(
+      context: context,
+      initialTime: initialTime,
+      builder: (context, child) {
+        return MediaQuery(
+          data: MediaQuery.of(context).copyWith(alwaysUse24HourFormat: true),
+          child: child!,
+        );
+      },
+    );
+    if (selected != null) {
+      final hourStr = selected.hour.toString().padLeft(2, '0');
+      final minStr = selected.minute.toString().padLeft(2, '0');
+      final newTime = '$hourStr:$minStr';
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(widget.prefKey, newTime);
+      
+      // Update NotificationService schedules
+      await NotificationService().scheduleMealReminders();
+
+      setState(() {
+        _time = newTime;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        ListTile(
+          onTap: _pickTime,
+          leading: Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: AksaColors.accent.withOpacity(0.12),
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: const Icon(Icons.access_time_rounded, color: AksaColors.accent, size: 18),
+          ),
+          title: Text(widget.title,
+              style: const TextStyle(
+                  color: AksaColors.textPrimary, fontSize: 14)),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(_time, style: const TextStyle(color: AksaColors.primary, fontWeight: FontWeight.bold)),
+              const SizedBox(width: 8),
+              const Icon(Icons.edit_outlined, color: AksaColors.textMuted, size: 18),
+            ],
+          ),
+        ),
+        if (widget.showDivider) const Divider(height: 1, indent: 56, endIndent: 16),
       ],
     );
   }
