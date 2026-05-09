@@ -23,6 +23,9 @@ class HealthConnectService {
     HealthDataType.SLEEP_IN_BED,
     HealthDataType.WEIGHT,
     HealthDataType.HEIGHT,
+    HealthDataType.BLOOD_OXYGEN,
+    HealthDataType.HEART_RATE_VARIABILITY_SDNN,
+    HealthDataType.BODY_TEMPERATURE,
   ];
 
   // Erişim yetkileri

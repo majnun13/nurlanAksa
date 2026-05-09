@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import List
+from typing import List, Optional
 
 class AnomalyData(BaseModel):
     has_anomaly: bool
@@ -37,11 +37,20 @@ class RiskData(BaseModel):
     label: str
     top_factors: List[dict]
 
+class VitalsData(BaseModel):
+    spo2_pct: Optional[float] = None       # Kan oksijeni % (null = veri yok)
+    hrv_ms: Optional[float] = None         # Kalp atış değişkenliği ms (null = veri yok)
+    temp_celsius: Optional[float] = None   # Vücut sıcaklığı °C (null = veri yok)
+    spo2_label: str = "Veri alınamadı"
+    hrv_label: str = "Veri alınamadı"
+    temp_label: str = "Veri alınamadı"
+
 class DashboardResponse(BaseModel):
     user_name: str
     anomaly: AnomalyData
     risk: RiskData
     activity: ActivityData
     sleep_heart: SleepHeartData
+    vitals: VitalsData
     weekly_chart: WeeklyChartData
     recommendations: List[RecommendationItem]

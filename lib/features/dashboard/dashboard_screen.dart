@@ -158,6 +158,13 @@ class _DashboardScreenState extends State<DashboardScreen> {
             ),
             _buildSleepHRRow(context, data.sleepHeart),
 
+            // ── Vitals (SpO2, HRV, Sıcaklık)
+            const SectionHeader(
+              'Vitallar',
+              subtitle: 'Kan oksijeni, HRV ve vücut sıcaklığı',
+            ),
+            _buildVitalsSection(context, data.vitals),
+
             // ── Weekly Steps Chart
             const SectionHeader('Haftalık Adım Grafiği', subtitle: 'Son 7 gün'),
             _buildStepsChart(context, data.weeklyChart),
@@ -683,6 +690,165 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
 
+  Widget _buildVitalsSection(BuildContext context, VitalsData vitals) {
+    final bool noVitalsData = vitals.spo2Pct == null &&
+        vitals.hrvMs == null &&
+        vitals.tempCelsius == null;
+
+    // Kaç tane vitals eksik?
+    final int missingCount = [
+      vitals.spo2Pct == null,
+      vitals.hrvMs == null,
+      vitals.tempCelsius == null,
+    ].where((v) => v).length;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 16),
+      child: Column(
+        children: [
+          // ── Bilgi Banner'ı ─────────────────────────────────────
+          if (missingCount > 0)
+            Padding(
+              padding: const EdgeInsets.only(bottom: 12),
+              child: Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E293B),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: noVitalsData
+                        ? AksaColors.riskMedium.withOpacity(0.3)
+                        : AksaColors.primary.withOpacity(0.2),
+                    width: 1,
+                  ),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: (noVitalsData
+                                ? AksaColors.riskMedium
+                                : AksaColors.primary)
+                            .withOpacity(0.15),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        noVitalsData
+                            ? Icons.watch_off_outlined
+                            : Icons.info_outline_rounded,
+                        color: noVitalsData
+                            ? AksaColors.riskMedium
+                            : AksaColors.primaryLight,
+                        size: 16,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            noVitalsData
+                                ? 'Akıllı Saat Verisi Alınamıyor'
+                                : '$missingCount vital veri eksik',
+                            style: TextStyle(
+                              color: noVitalsData
+                                  ? AksaColors.riskMedium
+                                  : AksaColors.primaryLight,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            noVitalsData
+                                ? 'SpO₂, HRV ve vücut sıcaklığı için uyumlu bir akıllı saat gereklidir. Apple Watch Series 6+, Samsung Galaxy Watch veya Pixel Watch desteklenmektedir.'
+                                : 'Bazı vital veriler cihazınız tarafından desteklenmiyor veya henüz ölçüm yapılmamış olabilir.',
+                            style: TextStyle(
+                              color: AksaColors.textSecondary.withOpacity(0.8),
+                              fontSize: 11,
+                              height: 1.4,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // ── SpO2 + HRV yan yana ──────────────────────────────
+          Row(
+            children: [
+              Expanded(
+                child: _VitalCard(
+                  icon: Icons.bloodtype_outlined,
+                  label: 'Kan Oksijeni',
+                  value: vitals.spo2Pct != null
+                      ? '%${vitals.spo2Pct!.round()}'
+                      : null,
+                  statusLabel: vitals.spo2Label,
+                  color: vitals.spo2Pct != null
+                      ? (vitals.spo2Pct! >= 95
+                          ? AksaColors.riskLow
+                          : vitals.spo2Pct! >= 90
+                              ? AksaColors.riskMedium
+                              : AksaColors.riskHigh)
+                      : AksaColors.textMuted,
+                  unit: 'SpO₂',
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: _VitalCard(
+                  icon: Icons.show_chart_rounded,
+                  label: 'HRV',
+                  value: vitals.hrvMs != null
+                      ? '${vitals.hrvMs!.round()}'
+                      : null,
+                  statusLabel: vitals.hrvLabel,
+                  color: vitals.hrvMs != null
+                      ? (vitals.hrvMs! >= 50
+                          ? AksaColors.riskLow
+                          : vitals.hrvMs! >= 35
+                              ? AksaColors.secondary
+                              : vitals.hrvMs! >= 25
+                                  ? AksaColors.riskMedium
+                                  : AksaColors.riskHigh)
+                      : AksaColors.textMuted,
+                  unit: 'ms',
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          // ── Vücut Sıcaklığı tam genişlik ─────────────────────
+          _VitalCard(
+            icon: Icons.thermostat_outlined,
+            label: 'Vücut Sıcaklığı',
+            value: vitals.tempCelsius != null
+                ? '${vitals.tempCelsius!.toStringAsFixed(1)}'
+                : null,
+            statusLabel: vitals.tempLabel,
+            color: vitals.tempCelsius != null
+                ? (vitals.tempCelsius! <= 37.2 && vitals.tempCelsius! >= 36.1
+                    ? AksaColors.riskLow
+                    : vitals.tempCelsius! <= 38.0
+                        ? AksaColors.riskMedium
+                        : AksaColors.riskHigh)
+                : AksaColors.textMuted,
+            unit: '°C',
+            fullWidth: true,
+          ),
+        ],
+      ),
+    );
+  }
+
+
   Widget _buildStepsChart(BuildContext context, WeeklyChartData chartData) {
     if (chartData.steps.isEmpty || chartData.days.isEmpty) {
       return const SizedBox.shrink();
@@ -958,6 +1124,120 @@ class _RecommendationTile extends StatelessWidget {
           ),
           Icon(Icons.chevron_right_rounded,
               color: AksaColors.textMuted, size: 20),
+        ],
+      ),
+    );
+  }
+}
+
+// ────────────────────────────────────────────
+class _VitalCard extends StatelessWidget {
+  const _VitalCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.statusLabel,
+    required this.color,
+    required this.unit,
+    this.fullWidth = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String? value; // null = veri yok
+  final String statusLabel;
+  final Color color;
+  final String unit;
+  final bool fullWidth;
+
+  bool get _hasData => value != null;
+
+  @override
+  Widget build(BuildContext context) {
+    return AksaCard(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(6),
+                decoration: BoxDecoration(
+                  color: color.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Icon(icon, color: color, size: 15),
+              ),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(label,
+                    style: const TextStyle(
+                        color: AksaColors.textSecondary, fontSize: 11)),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          if (_hasData) ...[
+            RichText(
+              text: TextSpan(
+                children: [
+                  TextSpan(
+                    text: value!,
+                    style: TextStyle(
+                        color: color,
+                        fontSize: fullWidth ? 32 : 28,
+                        fontWeight: FontWeight.w800),
+                  ),
+                  TextSpan(
+                    text: ' $unit',
+                    style: const TextStyle(
+                        color: AksaColors.textMuted, fontSize: 12),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 8),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: color.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: color.withOpacity(0.3)),
+              ),
+              child: Text(
+                statusLabel,
+                style: TextStyle(color: color, fontSize: 10),
+              ),
+            ),
+          ] else ...[
+            Row(
+              children: [
+                Icon(Icons.watch_outlined,
+                    color: AksaColors.textMuted.withOpacity(0.5), size: 18),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text(
+                    'Veri alınamadı',
+                    style: TextStyle(
+                      color: AksaColors.textMuted,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'Akıllı saat gerekli',
+              style: TextStyle(
+                color: AksaColors.textMuted.withOpacity(0.6),
+                fontSize: 10,
+              ),
+            ),
+          ],
         ],
       ),
     );

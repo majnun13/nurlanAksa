@@ -10,6 +10,7 @@ from app.schemas.dashboard import (
     RiskData,
     ActivityData,
     SleepHeartData,
+    VitalsData,
     WeeklyChartData,
     RecommendationItem,
 )
@@ -337,8 +338,67 @@ def _anomaly_from_wearable(wearable: dict, profile: dict) -> AnomalyData:
     )
 
 
+def _build_vitals(raw_wearable: dict) -> VitalsData:
+    """
+    Ham wearable verisinden VitalsData oluşturur.
+    Cihaz desteklemiyorsa (None) → "Veri alınamadı" etiketi kalır.
+    """
+    # SpO2
+    spo2_raw = raw_wearable.get("spo2_pct")
+    spo2 = float(spo2_raw) if spo2_raw is not None else None
+    if spo2 is not None:
+        if spo2 >= 95:
+            spo2_label = "Normal"
+        elif spo2 >= 90:
+            spo2_label = "Düşük"
+        else:
+            spo2_label = "Tehlikeli Düşük"
+    else:
+        spo2_label = "Veri alınamadı"
+
+    # HRV
+    hrv_raw = raw_wearable.get("hrv_ms")
+    hrv = float(hrv_raw) if hrv_raw is not None else None
+    if hrv is not None:
+        if hrv >= 50:
+            hrv_label = "Çok İyi"
+        elif hrv >= 35:
+            hrv_label = "Normal"
+        elif hrv >= 25:
+            hrv_label = "Düşük"
+        else:
+            hrv_label = "Stres Altında"
+    else:
+        hrv_label = "Veri alınamadı"
+
+    # Vücut Sıcaklığı
+    temp_raw = raw_wearable.get("temp_celsius")
+    temp = float(temp_raw) if temp_raw is not None else None
+    if temp is not None:
+        if 36.1 <= temp <= 37.2:
+            temp_label = "Normal"
+        elif temp > 37.2 and temp <= 38.0:
+            temp_label = "Hafif Ateş"
+        elif temp > 38.0:
+            temp_label = "Yüksek Ateş"
+        else:
+            temp_label = "Düşük"
+    else:
+        temp_label = "Veri alınamadı"
+
+    return VitalsData(
+        spo2_pct=spo2,
+        hrv_ms=hrv,
+        temp_celsius=temp,
+        spo2_label=spo2_label,
+        hrv_label=hrv_label,
+        temp_label=temp_label,
+    )
+
+
 @router.get("/summary", response_model=DashboardResponse)
 async def get_dashboard_summary(user_id: str = Depends(get_current_user_id)):
+
     """
     Kullanıcının ana ekranında gösterilecek özet verileri döndürür.
     Eksik/None veri durumunda güvenli varsayılan değerler kullanılır.
@@ -363,7 +423,8 @@ async def get_dashboard_summary(user_id: str = Depends(get_current_user_id)):
         wearable_row = await pool.fetchrow(
             """
             SELECT step_count, avg_hr_bpm, resting_hr_bpm, sleep_hours,
-                   sleep_score, hrv_ms, spo2_pct, active_minutes, calories_burned
+                   sleep_score, hrv_ms, spo2_pct, active_minutes, calories_burned,
+                   temp_celsius
             FROM daily_wearable_logs
             WHERE user_id = $1
             ORDER BY log_date DESC
@@ -371,7 +432,9 @@ async def get_dashboard_summary(user_id: str = Depends(get_current_user_id)):
             """,
             user_id,
         )
-        wearable = _safe_wearable(dict(wearable_row) if wearable_row else None)
+        # Ham DB verisini sakla (null/None olanlar vitals kartlarında "Veri alınamadı" olacak)
+        raw_wearable = dict(wearable_row) if wearable_row else {}
+        wearable = _safe_wearable(raw_wearable)
 
         # ── Son 7 günün adım verisi ───────────────────────────────
         week_rows = await pool.fetch(
@@ -461,6 +524,7 @@ async def get_dashboard_summary(user_id: str = Depends(get_current_user_id)):
                 resting_hr_label=hr_label,
                 resting_hr_severity=hr_severity,
             ),
+            vitals=_build_vitals(raw_wearable),
             weekly_chart=WeeklyChartData(
                 days=weekly_days,
                 steps=weekly_steps,

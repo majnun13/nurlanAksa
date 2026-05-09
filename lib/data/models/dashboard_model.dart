@@ -147,12 +147,42 @@ class RecommendationItem {
   }
 }
 
+class VitalsData {
+  final double? spo2Pct;
+  final double? hrvMs;
+  final double? tempCelsius;
+  final String spo2Label;
+  final String hrvLabel;
+  final String tempLabel;
+
+  VitalsData({
+    this.spo2Pct,
+    this.hrvMs,
+    this.tempCelsius,
+    this.spo2Label = 'Veri alınamadı',
+    this.hrvLabel = 'Veri alınamadı',
+    this.tempLabel = 'Veri alınamadı',
+  });
+
+  factory VitalsData.fromJson(Map<String, dynamic> json) {
+    return VitalsData(
+      spo2Pct: json['spo2_pct'] != null ? (json['spo2_pct'] as num).toDouble() : null,
+      hrvMs: json['hrv_ms'] != null ? (json['hrv_ms'] as num).toDouble() : null,
+      tempCelsius: json['temp_celsius'] != null ? (json['temp_celsius'] as num).toDouble() : null,
+      spo2Label: json['spo2_label'] ?? 'Veri alınamadı',
+      hrvLabel: json['hrv_label'] ?? 'Veri alınamadı',
+      tempLabel: json['temp_label'] ?? 'Veri alınamadı',
+    );
+  }
+}
+
 class DashboardModel {
   final String userName;
   final AnomalyData anomaly;
   final RiskData risk;
   final ActivityData activity;
   final SleepHeartData sleepHeart;
+  final VitalsData vitals;
   final WeeklyChartData weeklyChart;
   final List<RecommendationItem> recommendations;
 
@@ -162,6 +192,7 @@ class DashboardModel {
     required this.risk,
     required this.activity,
     required this.sleepHeart,
+    required this.vitals,
     required this.weeklyChart,
     required this.recommendations,
   });
@@ -177,6 +208,7 @@ class DashboardModel {
       risk: RiskData.fromJson(json['risk'] ?? {}),
       activity: ActivityData.fromJson(json['activity'] ?? {}),
       sleepHeart: SleepHeartData.fromJson(json['sleep_heart'] ?? {}),
+      vitals: VitalsData.fromJson(json['vitals'] ?? {}),
       weeklyChart: WeeklyChartData.fromJson(json['weekly_chart'] ?? {}),
       recommendations: recs,
     );

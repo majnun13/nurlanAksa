@@ -32,6 +32,9 @@ class WearableSyncService {
         HealthDataType.ACTIVE_ENERGY_BURNED,
         HealthDataType.SLEEP_SESSION,
         HealthDataType.RESTING_HEART_RATE,
+        HealthDataType.BLOOD_OXYGEN,
+        HealthDataType.HEART_RATE_VARIABILITY_SDNN,
+        HealthDataType.BODY_TEMPERATURE,
       ];
     }
     // iOS
@@ -42,6 +45,9 @@ class WearableSyncService {
       HealthDataType.SLEEP_ASLEEP,
       HealthDataType.SLEEP_IN_BED,
       HealthDataType.RESTING_HEART_RATE,
+      HealthDataType.BLOOD_OXYGEN,
+      HealthDataType.HEART_RATE_VARIABILITY_SDNN,
+      HealthDataType.BODY_TEMPERATURE,
     ];
   }
 
@@ -236,6 +242,74 @@ class WearableSyncService {
       if (sleepHours > 0) {
         payload['sleep_hours'] = double.parse(sleepHours.toStringAsFixed(1));
         payload['sleep_score'] = _estimateSleepScore(sleepHours);
+      }
+
+      // SpO2 (Kan Oksijeni)
+      double? spo2;
+      try {
+        final spo2Data = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.BLOOD_OXYGEN],
+          startTime: midnight,
+          endTime: now,
+        );
+        if (spo2Data.isNotEmpty) {
+          final watchData = spo2Data.where(
+            (d) => d.sourceName.toLowerCase().contains('watch')).toList();
+          final dataToUse = watchData.isNotEmpty ? watchData : spo2Data;
+          if (dataToUse.isNotEmpty) {
+            spo2 = (dataToUse.last.value as NumericHealthValue)
+                .numericValue.toDouble();
+          }
+        }
+      } catch (e) {
+        debugPrint('[WearableSync] SpO2 okuma hatası: $e');
+      }
+
+      // HRV (Kalp Atış Değişkenliği)
+      double? hrvMs;
+      try {
+        final hrvData = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.HEART_RATE_VARIABILITY_SDNN],
+          startTime: midnight,
+          endTime: now,
+        );
+        if (hrvData.isNotEmpty) {
+          final watchData = hrvData.where(
+            (d) => d.sourceName.toLowerCase().contains('watch')).toList();
+          final dataToUse = watchData.isNotEmpty ? watchData : hrvData;
+          if (dataToUse.isNotEmpty) {
+            hrvMs = (dataToUse.last.value as NumericHealthValue)
+                .numericValue.toDouble();
+          }
+        }
+      } catch (e) {
+        debugPrint('[WearableSync] HRV okuma hatası: $e');
+      }
+
+      // Vücut Sıcaklığı
+      double? bodyTemp;
+      try {
+        final tempData = await _health.getHealthDataFromTypes(
+          types: [HealthDataType.BODY_TEMPERATURE],
+          startTime: yesterday, // Sıcaklık genelde gece ölçülür
+          endTime: now,
+        );
+        if (tempData.isNotEmpty) {
+          bodyTemp = (tempData.last.value as NumericHealthValue)
+              .numericValue.toDouble();
+        }
+      } catch (e) {
+        debugPrint('[WearableSync] Vücut sıcaklığı okuma hatası: $e');
+      }
+
+      if (spo2 != null && spo2 > 0) {
+        payload['spo2_pct'] = spo2.round();
+      }
+      if (hrvMs != null && hrvMs > 0) {
+        payload['hrv_ms'] = hrvMs.round();
+      }
+      if (bodyTemp != null && bodyTemp > 30) {
+        payload['temp_celsius'] = double.parse(bodyTemp.toStringAsFixed(1));
       }
 
       // Hiç veri yoksa bile bağlantıyı başarılı say

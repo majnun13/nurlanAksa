@@ -156,6 +156,7 @@ CREATE TABLE IF NOT EXISTS daily_wearable_logs (
     spo2_pct         INT,                             -- Kan oksijen satürasyon yüzdesi
     active_minutes   INT,                             -- Aktif dakika sayısı
     calories_burned  INT,                             -- Yakılan kalori
+    temp_celsius     NUMERIC(4,1),                    -- Vücut sıcaklığı (°C)
 
     created_at       TIMESTAMPTZ NOT NULL DEFAULT NOW(),
 

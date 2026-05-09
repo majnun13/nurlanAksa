@@ -19,6 +19,7 @@ _logger = logging.getLogger(__name__)
 _ALLOWED_COLUMNS: set[str] = {
     "step_count", "avg_hr_bpm", "resting_hr_bpm", "calories_burned",
     "sleep_hours", "active_minutes", "sleep_score", "spo2_pct", "hrv_ms",
+    "temp_celsius",
 }
 
 
@@ -32,6 +33,7 @@ class WearableSyncPayload(BaseModel):
     sleep_score:     Optional[int]   = Field(None, ge=0, le=100)
     spo2_pct:        Optional[float] = Field(None, ge=0, le=100)
     hrv_ms:          Optional[float] = Field(None, ge=0)
+    temp_celsius:    Optional[float] = Field(None, ge=30.0, le=45.0)
 
 
 @router.post("/sync")
