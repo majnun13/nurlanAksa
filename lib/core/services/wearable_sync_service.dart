@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────
 
 import 'dart:io' show Platform;
+import 'package:flutter/foundation.dart';
 import 'package:dio/dio.dart';
 import 'package:health/health.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -21,14 +22,28 @@ class WearableSyncService {
   final Health _health = Health();
   bool _isSyncing = false;
 
-  static final List<HealthDataType> _readTypes = [
-    HealthDataType.STEPS,
-    HealthDataType.HEART_RATE,
-    HealthDataType.ACTIVE_ENERGY_BURNED,
-    HealthDataType.SLEEP_ASLEEP,
-    HealthDataType.SLEEP_IN_BED,
-    HealthDataType.RESTING_HEART_RATE,
-  ];
+  /// Platforma göre farklı veri türleri kullanılır.
+  /// Android Health Connect ve iOS HealthKit farklı türleri destekler.
+  static List<HealthDataType> get _readTypes {
+    if (Platform.isAndroid) {
+      return [
+        HealthDataType.STEPS,
+        HealthDataType.HEART_RATE,
+        HealthDataType.ACTIVE_ENERGY_BURNED,
+        HealthDataType.SLEEP_SESSION,
+        HealthDataType.RESTING_HEART_RATE,
+      ];
+    }
+    // iOS
+    return [
+      HealthDataType.STEPS,
+      HealthDataType.HEART_RATE,
+      HealthDataType.ACTIVE_ENERGY_BURNED,
+      HealthDataType.SLEEP_ASLEEP,
+      HealthDataType.SLEEP_IN_BED,
+      HealthDataType.RESTING_HEART_RATE,
+    ];
+  }
 
   /// Son senkronizasyon zamanını döner (human-readable)
   static Future<String> getLastSyncLabel() async {
@@ -53,19 +68,34 @@ class WearableSyncService {
     _isSyncing = true;
 
     try {
-      // iOS'ta configure gerekmez; Android'de Health Connect için gerekir
+      // Android'de Health Connect kurulumunu kontrol et ve yapılandır
       if (Platform.isAndroid) {
+        // Health Connect uygulamasının yüklü/aktif olup olmadığını kontrol et
+        final status = await _health.getHealthConnectSdkStatus();
+        debugPrint('[WearableSync] Health Connect SDK status: $status');
+
+        if (status != HealthConnectSdkStatus.sdkAvailable) {
+          debugPrint('[WearableSync] Health Connect mevcut değil. Status: $status');
+          // Health Connect yüklü değilse kullanıcıyı yönlendir
+          await _health.installHealthConnect();
+          _isSyncing = false;
+          return false;
+        }
+
         await _health.configure();
       }
 
-      // İzin iste (zaten verilmişse sessizce geçer, yeni bir popup açmaz)
+      // İzin iste — Android'de Health Connect izin ekranı açılır
+      debugPrint('[WearableSync] İzin isteniyor...');
       final granted = await _health.requestAuthorization(
         _readTypes,
         permissions: _readTypes.map((_) => HealthDataAccess.READ).toList(),
       );
+      debugPrint('[WearableSync] İzin sonucu: $granted');
 
       // İzin verilmediyse çık (kullanıcı reddetmiş)
       if (!granted) {
+        debugPrint('[WearableSync] İzin reddedildi');
         _isSyncing = false;
         return false;
       }
@@ -92,7 +122,10 @@ class WearableSyncService {
               sum +
               (d.value as NumericHealthValue).numericValue.toDouble(),
         );
-      } catch (_) {}
+      } catch (e) {
+        // B25: Kalori okuma hatası sessizce yutulmuyor
+        debugPrint('[WearableSync] Kalori okuma hatası: $e');
+      }
 
       // Ortalama kalp atış hızı
       double? avgHr;
@@ -117,13 +150,19 @@ class WearableSyncService {
             lastHr = (dataToUse.last.value as NumericHealthValue).numericValue.toInt();
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        // B25: HR okuma hatası sessizce yutulmuyor
+        debugPrint('[WearableSync] Kalp hızı okuma hatası: $e');
+      }
 
       // Dünden bu yana uyku
       double sleepHours = 0;
       try {
+        final sleepTypes = Platform.isAndroid
+            ? [HealthDataType.SLEEP_SESSION]
+            : [HealthDataType.SLEEP_ASLEEP, HealthDataType.SLEEP_IN_BED];
         final sleepData = await _health.getHealthDataFromTypes(
-          types: [HealthDataType.SLEEP_ASLEEP, HealthDataType.SLEEP_IN_BED],
+          types: sleepTypes,
           startTime: yesterday,
           endTime: now,
         );
@@ -135,7 +174,10 @@ class WearableSyncService {
           }
           sleepHours = totalMinutes / 60.0;
         }
-      } catch (_) {}
+      } catch (e) {
+        // B25: Uyku verisi okuma hatası
+        debugPrint('[WearableSync] Uyku verisi okuma hatası: $e');
+      }
 
       // ── Payload oluştur ──────────────────────────────────────
       // Sıfır gelen alanları null bırak ki backend mevcut değeri silmesin
@@ -173,7 +215,10 @@ class WearableSyncService {
                 .toInt();
           }
         }
-      } catch (_) {}
+      } catch (e) {
+        // B25: Dinlenme nabzı okuma hatası
+        debugPrint('[WearableSync] Dinlenme nabzı okuma hatası: $e');
+      }
 
       // 1. Fallback: Apple Watch yoksa, son HEART_RATE ölçümünü resting HR kabul et
       if (restingHr == null && lastHr != null) {
@@ -193,10 +238,14 @@ class WearableSyncService {
         payload['sleep_score'] = _estimateSleepScore(sleepHours);
       }
 
-      // Hiç veri yoksa (Apple Watch yok, HK verisi boş) gönderme
+      // Hiç veri yoksa bile bağlantıyı başarılı say
+      // (izinler verildi ama henüz veri kaydedilmemiş olabilir)
       if (payload.isEmpty) {
+        debugPrint('[WearableSync] İzinler verildi ama henüz sağlık verisi yok. Bağlantı başarılı sayılıyor.');
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString(_lastSyncKey, DateTime.now().toIso8601String());
         _isSyncing = false;
-        return false;
+        return true;
       }
 
       // ── Backend'e gönder ─────────────────────────────────────

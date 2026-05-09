@@ -122,62 +122,64 @@ class _WearableConnectScreenState extends State<WearableConnectScreen> {
                 // ── Google Fit
                 _WearableCard(
                   platformName: 'Google Fit',
-                  description: 'Adım sayısı, egzersiz, uyku ve kalp atışı verilerini senkronize edin.',
-                  isConnected: _googleFit,
-                  isLoading: _connectingGoogle,
-                  logoWidget: Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      gradient: const LinearGradient(
-                        colors: [Color(0xFF4285F4), Color(0xFF34A853)],
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
+                    description: 'Adım sayısı, egzersiz, uyku ve kalp atışı verilerini senkronize edin.',
+                    isConnected: _googleFit,
+                    isLoading: _connectingGoogle,
+                    logoWidget: Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        gradient: const LinearGradient(
+                          colors: [Color(0xFF4285F4), Color(0xFF34A853)],
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                        ),
                       ),
+                      child: const Icon(Icons.directions_run_rounded,
+                          color: Colors.white, size: 26),
                     ),
-                    child: const Icon(Icons.directions_run_rounded,
-                        color: Colors.white, size: 26),
+                    permissions: const [
+                      '📊 Adım & Mesafe',
+                      '❤️ Kalp Atış Hızı',
+                      '😴 Uyku Verileri',
+                      '🔥 Yakılan Kalori',
+                    ],
+                    onConnect: _connectGoogle,
+                    onDisconnect: _disconnectGoogle,
                   ),
-                  permissions: const [
-                    '📊 Adım & Mesafe',
-                    '❤️ Kalp Atış Hızı',
-                    '😴 Uyku Verileri',
-                    '🔥 Yakılan Kalori',
-                  ],
-                  onConnect: Platform.isAndroid ? _connectGoogle : _connectGoogle,
-                  onDisconnect: _disconnectGoogle,
-                ),
 
-                const SizedBox(height: 14),
+                if (Platform.isIOS)
+                  const SizedBox(height: 14),
 
                 // ── Apple HealthKit
-                _WearableCard(
-                  platformName: 'Apple HealthKit',
-                  description: 'iPhone & Apple Watch ile sağlık ve fitness verilerini aktarın.',
-                  isConnected: _healthKit,
-                  isLoading: _connectingApple,
-                  logoWidget: Container(
-                    width: 52,
-                    height: 52,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(16),
-                      color: AksaColors.surfaceElevated,
-                      border: Border.all(color: const Color(0xFF334155)),
+                if (Platform.isIOS)
+                  _WearableCard(
+                    platformName: 'Apple HealthKit',
+                    description: 'iPhone & Apple Watch ile sağlık ve fitness verilerini aktarın.',
+                    isConnected: _healthKit,
+                    isLoading: _connectingApple,
+                    logoWidget: Container(
+                      width: 52,
+                      height: 52,
+                      decoration: BoxDecoration(
+                        borderRadius: BorderRadius.circular(16),
+                        color: AksaColors.surfaceElevated,
+                        border: Border.all(color: const Color(0xFF334155)),
+                      ),
+                      child: const Center(
+                        child: Text('🍎', style: TextStyle(fontSize: 26)),
+                      ),
                     ),
-                    child: const Center(
-                      child: Text('🍎', style: TextStyle(fontSize: 26)),
-                    ),
+                    permissions: const [
+                      '📊 Aktivite & Adım',
+                      '❤️ EKG & Kalp Atışı',
+                      '😴 Uyku Analizi',
+                      '🩸 Kan Oksijeni',
+                    ],
+                    onConnect: _connectApple,
+                    onDisconnect: _disconnectApple,
                   ),
-                  permissions: const [
-                    '📊 Aktivite & Adım',
-                    '❤️ EKG & Kalp Atışı',
-                    '😴 Uyku Analizi',
-                    '🩸 Kan Oksijeni',
-                  ],
-                  onConnect: Platform.isIOS ? _connectApple : _connectApple,
-                  onDisconnect: _disconnectApple,
-                ),
 
                 const SizedBox(height: 24),
 

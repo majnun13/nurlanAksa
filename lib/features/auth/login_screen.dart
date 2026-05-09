@@ -18,6 +18,7 @@ class _LoginScreenState extends State<LoginScreen>
   bool _obscurePass = true;
   bool _obscureConfirm = true;
   bool _loading = false;
+  bool _termsAccepted = false; // Kullanım koşulları onayı
 
   final _authRepo = AuthRepository();
 
@@ -81,12 +82,22 @@ class _LoginScreenState extends State<LoginScreen>
       _showError('Tüm alanları doldurun.');
       return;
     }
+    // E-posta format kontrolü
+    final emailRegex = RegExp(r'^[\w.+-]+@[\w-]+\.[\w.-]+$');
+    if (!emailRegex.hasMatch(email)) {
+      _showError('Geçerli bir e-posta adresi girin.');
+      return;
+    }
     if (pass != confirm) {
       _showError('Şifreler eşleşmiyor.');
       return;
     }
-    if (pass.length < 6) {
-      _showError('Şifre en az 6 karakter olmalıdır.');
+    if (pass.length < 8) {
+      _showError('Şifre en az 8 karakter olmalıdır.');
+      return;
+    }
+    if (!_termsAccepted) {
+      _showError('Devam etmek için kullanım koşullarını kabul etmeniz gerekiyor.');
       return;
     }
 
@@ -355,7 +366,10 @@ class _LoginScreenState extends State<LoginScreen>
         Align(
           alignment: Alignment.centerRight,
           child: TextButton(
-            onPressed: () {},
+            onPressed: () {
+              _showError('Şifremi unuttum özelliği yakında eklenecek. '
+                  'Hesabınızı silip yeniden oluşturabilirsiniz.');
+            },
             child: const Text(
               'Şifremi Unuttum',
               style: TextStyle(color: AksaColors.primaryLight, fontSize: 13),
@@ -421,8 +435,8 @@ class _LoginScreenState extends State<LoginScreen>
         Row(
           children: [
             Checkbox(
-              value: true,
-              onChanged: (_) {},
+              value: _termsAccepted,
+              onChanged: (v) => setState(() => _termsAccepted = v ?? false),
               activeColor: AksaColors.primary,
               side: const BorderSide(color: AksaColors.textMuted),
             ),

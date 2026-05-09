@@ -34,9 +34,9 @@ class HealthConnectService {
   /// Sağlık verilerine erişim izni iste
   Future<bool> requestAuthorization() async {
     try {
-      // Android Health Connect kurulu mu kontrol et
+      // B26: _health field'ı kullan, yeni Health() instance oluşturma
       if (Platform.isAndroid) {
-        await Health().configure();
+        await _health.configure();
       }
 
       final granted = await _health.requestAuthorization(

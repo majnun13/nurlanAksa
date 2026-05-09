@@ -19,6 +19,7 @@ class SleepHeartData(BaseModel):
     sleep_hours: float
     sleep_quality: float
     resting_hr: int
+    avg_hr: int = 0               # Günlük ortalama nabız
     resting_hr_label: str = "Normal"
     resting_hr_severity: str = "good"  # "good" | "warning" | "danger"
 

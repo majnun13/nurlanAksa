@@ -53,6 +53,7 @@ def calculate_bmr(weight_kg: float, height_cm: float, age: int, gender: str) -> 
     Mifflin-St Jeor denklemi ile BMR hesaplar.
     Erkek:  10W + 6.25H − 5A + 5
     Kadın:  10W + 6.25H − 5A − 161
+    Kaynak: Mifflin MD et al. (1990) J Am Diet Assoc.
     """
     base = 10 * weight_kg + 6.25 * height_cm - 5 * age
     if gender and gender.lower() in ("erkek", "male"):

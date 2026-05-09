@@ -65,15 +65,17 @@ class SettingsScreenState extends State<SettingsScreen> {
   }
 
   Future<void> _loadSyncStatus() async {
-    // iOS'ta hasPermissions() her zaman null döndürür (Apple gizlilik kuralı).
-    // Bunun yerine son sync zamanını kontrol ederek bağlı olup olmadığına karar veririz.
     final prefs = await SharedPreferences.getInstance();
     final lastSync = prefs.getString('last_wearable_sync');
     final isConnected = lastSync != null; // en az bir kez sync olduysa bağlı sayılır
     final label = await WearableSyncService.getLastSyncLabel();
     if (mounted) {
       setState(() {
-        _healthKitConnected = isConnected;
+        if (Platform.isAndroid) {
+          _googleFitConnected = isConnected;
+        } else {
+          _healthKitConnected = isConnected;
+        }
         _lastSyncLabel = isConnected ? label : 'Bağlı değil';
       });
     }
@@ -427,23 +429,65 @@ class SettingsScreenState extends State<SettingsScreen> {
   Widget _buildWearableSection(BuildContext context) {
     return Column(
       children: [
-        _WearableTile(
-          logo: '🟢',
-          name: 'Google Fit',
-          status: _googleFitConnected ? 'Bağlı' : 'Bağlı Değil',
-          isConnected: _googleFitConnected,
-          lastSync: _googleFitConnected ? _lastSyncLabel : 'Bağlı değil',
-          onToggle: () =>
-              setState(() => _googleFitConnected = !_googleFitConnected),
-        ),
-        const SizedBox(height: 10),
-        _WearableTile(
-          logo: Platform.isIOS ? '❤️' : '💙',
-          name: Platform.isIOS ? 'Apple HealthKit' : 'Google Fit',
-          status: _healthKitConnected ? 'Bağlı' : 'Bağlı Değil',
-          isConnected: _healthKitConnected,
-          lastSync: _healthKitConnected ? _lastSyncLabel : 'Bağlı değil',
-          onToggle: () async {
+        if (Platform.isAndroid)
+          _WearableTile(
+            logo: '🟢',
+            name: 'Health Connect (Google Fit)',
+            status: _googleFitConnected ? 'Bağlı' : 'Bağlı Değil',
+            isConnected: _googleFitConnected,
+            lastSync: _googleFitConnected ? _lastSyncLabel : 'Bağlı değil',
+            onToggle: () async {
+              if (_googleFitConnected) {
+                // Bağlantıyı kes
+                final prefs = await SharedPreferences.getInstance();
+                await prefs.remove('last_wearable_sync');
+                if (mounted) {
+                  setState(() {
+                    _googleFitConnected = false;
+                    _lastSyncLabel = 'Bağlı değil';
+                  });
+                }
+              } else {
+                // Bağlan — İzin iste ve sync başlat
+                final success = await WearableSyncService.instance.syncNow();
+                if (mounted) {
+                  setState(() {
+                    _googleFitConnected = success;
+                  });
+                  if (success) {
+                    await _loadSyncStatus();
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('✅ Health Connect bağlandı!'),
+                        backgroundColor: AksaColors.riskLow,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  } else {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: const Text('⚠️ Health Connect bağlantısı başarısız. Health Connect uygulamasının yüklü olduğundan ve izinlerin verildiğinden emin olun.'),
+                        backgroundColor: AksaColors.riskMedium,
+                        behavior: SnackBarBehavior.floating,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12)),
+                      ),
+                    );
+                  }
+                }
+              }
+            },
+          ),
+        if (Platform.isIOS)
+          _WearableTile(
+            logo: '❤️',
+            name: 'Apple HealthKit',
+            status: _healthKitConnected ? 'Bağlı' : 'Bağlı Değil',
+            isConnected: _healthKitConnected,
+            lastSync: _healthKitConnected ? _lastSyncLabel : 'Bağlı değil',
+            onToggle: () async {
             if (_healthKitConnected) {
               // Bağlantıyı kes — SharedPreferences'tan sync bilgisini sil
               final prefs = await SharedPreferences.getInstance();
@@ -465,7 +509,7 @@ class SettingsScreenState extends State<SettingsScreen> {
                   await _loadSyncStatus();
                   ScaffoldMessenger.of(context).showSnackBar(
                     SnackBar(
-                      content: Text(Platform.isIOS ? '✅ Apple HealthKit bağlandı!' : '✅ Google Fit bağlandı!'),
+                      content: const Text('✅ Apple HealthKit bağlandı!'),
                       backgroundColor: AksaColors.riskLow,
                       behavior: SnackBarBehavior.floating,
                       shape: RoundedRectangleBorder(
@@ -513,9 +557,41 @@ class SettingsScreenState extends State<SettingsScreen> {
               return Expanded(
                 child: Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 4),
+                  // B13: Hedef seçimi artık işlevsel — backend'e kaydediyor
                   child: GestureDetector(
-                    onTap: () {},
-                    child: Container(
+                    onTap: selected
+                        ? null
+                        : () async {
+                            if (_profile == null) return;
+                            try {
+                              await _profileRepo.saveHealthProfile(
+                                healthGoal: g['id'],
+                              );
+                              await _loadProfile();
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('🎯 Hedef güncellendi: ${g['label']}'),
+                                    backgroundColor: AksaColors.riskLow,
+                                    behavior: SnackBarBehavior.floating,
+                                    shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(12)),
+                                  ),
+                                );
+                              }
+                            } catch (e) {
+                              if (mounted) {
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text('Hata: ${e.toString().replaceAll('Exception: ', '')}'),
+                                    backgroundColor: AksaColors.riskHigh,
+                                  ),
+                                );
+                              }
+                            }
+                          },
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
                       padding: const EdgeInsets.symmetric(vertical: 12),
                       decoration: BoxDecoration(
                         color: selected

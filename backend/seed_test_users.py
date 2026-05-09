@@ -5,10 +5,12 @@ Her birinin sağlık profili, adım sayısı ve nabız verileri farklıdır.
 import asyncio
 import asyncpg
 import bcrypt
+import os
 import uuid
 from datetime import datetime, timezone
 
-DB_URL = "postgresql://yavuz@localhost:5432/aksa"
+# DB_URL ortam değişkeninden okunuyor. Varsayılan olarak localhost kullanılır.
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://localhost:5432/aksa")
 
 # ── 10 Farklı Test Kullanıcısı ────────────────────────────────
 TEST_USERS = [
@@ -135,7 +137,8 @@ TEST_USERS = [
 ]
 
 
-async def hash_password(password: str) -> str:
+def hash_password(password: str) -> str:
+    """bcrypt senkron — async wrapper'a gerek yok."""
     return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
@@ -155,7 +158,7 @@ async def main():
             continue
 
         # Şifreyi hashle
-        pw_hash = await hash_password(user_data["password"])
+        pw_hash = hash_password(user_data["password"])
         user_id = str(uuid.uuid4())
 
         # Kullanıcıyı ekle

@@ -4,12 +4,26 @@
 --  Güncelleme : 2026-04-07
 --
 --  Çalıştırma:
---    DBeaver'da "aksa" veritabanını seçin,
+--    DBeaver'da kullanacağınız veritabanını seçin,
 --    bu dosyayı SQL Editor'e yapıştırın ve F5'e basın.
+--    Tablolar "nurlanAksaV1" şemasının içine kurulacaktır.
 -- ============================================================
+
+-- ─── Şema (Schema) Ayarı ────────────────────────────────────
+CREATE SCHEMA IF NOT EXISTS "nurlanAksaV1";
+SET search_path TO "nurlanAksaV1";
 
 -- ─── Uzantılar ──────────────────────────────────────────────
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";   -- gen_random_uuid() için
+
+-- ─── Temizleme (Eski tabloları sil) ─────────────────────────
+DROP TABLE IF EXISTS daily_wearable_logs CASCADE;
+DROP TABLE IF EXISTS meal_logs CASCADE;
+DROP TABLE IF EXISTS health_profiles CASCADE;
+DROP TABLE IF EXISTS email_verification_tokens CASCADE;
+DROP TABLE IF EXISTS sessions CASCADE;
+DROP TABLE IF EXISTS otp_attempts CASCADE;
+DROP TABLE IF EXISTS users CASCADE;
 
 -- ─── users ──────────────────────────────────────────────────
 -- Temel kimlik doğrulama tablosu.
@@ -122,7 +136,7 @@ CREATE TABLE IF NOT EXISTS meal_logs (
 );
 
 CREATE INDEX IF NOT EXISTS idx_meal_logs_user_id ON meal_logs (user_id);
-CREATE INDEX IF NOT EXISTS idx_meal_logs_date ON meal_logs (user_id, (created_at::date));
+CREATE INDEX IF NOT EXISTS idx_meal_logs_date ON meal_logs (user_id, ((created_at AT TIME ZONE 'UTC')::date));
 
 -- ─── daily_wearable_logs ───────────────────────────────────────
 -- Günlük giyilebilir cihaz verileri (adım, nabız, uyku vb.)

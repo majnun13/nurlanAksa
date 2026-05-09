@@ -19,10 +19,12 @@ class ApiClient {
 
   static String get _baseUrl {
     if (Platform.isAndroid) {
-      return 'http://10.0.2.2:8000';
+      // Fiziksel cihaz veya emülatör fark etmeksizin aynı Wi-Fi'daki Mac'e bağlanması için
+      return 'http://192.168.1.95:8000';
     }
-    // Gerçek iPhone cihazının Mac'teki sunucuya bağlanabilmesi için Mac'in Wi-Fi / Hotspot IP'si:
-    return 'http://192.168.1.86:8000';
+    // iOS Simulator için: http://localhost:8000
+    // Fiziksel iPhone cihazı için Mac'in yerel IP'sini girdim.
+    return 'http://192.168.1.95:8000';
   }
 
   static Dio? _dio;
@@ -54,7 +56,7 @@ class ApiClient {
             handler.next(options);
           },
           onError: (DioException error, handler) async {
-            // 401 gelirse → token'ı silmeden önce RETRY yap
+            // 401 gelirse → token'lı bile olsa RETRY yap
             // Sunucu restart sonrası race condition'dan korur
             if (error.response?.statusCode == 401 &&
                 error.requestOptions.extra['_retried'] != true) {
@@ -71,6 +73,8 @@ class ApiClient {
                   return handler.resolve(response);
                 } catch (_) {
                   // Retry de 401 verdiyse token gerçekten geçersiz → sil
+                  // B15: Kullanıcı login'e yönlendirilmeli — hata
+                  //       mesajı extractError için 401 olarak kalır
                   await prefs.remove(_tokenKey);
                   _prefs = prefs;
                 }
@@ -118,6 +122,20 @@ class ApiClient {
       return 'Sunucuya ulaşılamadı. Uygulamanın şu anda açık olduğundan emin olun.';
     }
 
+    if (e.response?.data is Map) {
+      final data = e.response?.data as Map;
+      final detail = data['detail'];
+      
+      if (detail is String && detail.isNotEmpty) return detail;
+      
+      if (detail is List && detail.isNotEmpty) {
+        final firstError = detail.first;
+        if (firstError is Map && firstError['msg'] is String) {
+          return firstError['msg'] as String;
+        }
+      }
+    }
+
     final status = e.response?.statusCode;
     if (status == 401) return 'Oturum süreniz dolmuş. Lütfen tekrar giriş yapın.';
     if (status == 403) return 'Bu işleme yetkiniz yok.';
@@ -125,21 +143,6 @@ class ApiClient {
     if (status == 422) return 'Geçersiz istek. Lütfen bilgilerinizi kontrol edin.';
     if (status != null && status >= 500) return 'Sunucu hatası oluştu. Lütfen daha sonra tekrar deneyin.';
 
-    if (e.response?.data is! Map) {
-       return 'Bir hata oluştu. Lütfen tekrar deneyin.';
-    }
-    
-    final data = e.response?.data as Map;
-    final detail = data['detail'];
-    
-    if (detail is String) return detail;
-    
-    if (detail is List && detail.isNotEmpty) {
-      final firstError = detail.first;
-      if (firstError is Map && firstError['msg'] is String) {
-        return firstError['msg'] as String;
-      }
-    }
     return 'Bir hata oluştu. Lütfen tekrar deneyin.';
   }
 }

@@ -94,6 +94,7 @@ class SleepHeartData {
   final double sleepHours;
   final double sleepQuality;
   final int restingHr;
+  final int avgHr;
   final String restingHrLabel;
   final String restingHrSeverity; // "good" | "warning" | "danger"
 
@@ -101,6 +102,7 @@ class SleepHeartData {
     required this.sleepHours,
     required this.sleepQuality,
     required this.restingHr,
+    required this.avgHr,
     this.restingHrLabel = 'Normal',
     this.restingHrSeverity = 'good',
   });
@@ -110,6 +112,7 @@ class SleepHeartData {
       sleepHours: (json['sleep_hours'] ?? 0).toDouble(),
       sleepQuality: (json['sleep_quality'] ?? 0).toDouble(),
       restingHr: json['resting_hr'] ?? 0,
+      avgHr: json['avg_hr'] ?? 0,
       restingHrLabel: json['resting_hr_label'] ?? 'Normal',
       restingHrSeverity: json['resting_hr_severity'] ?? 'good',
     );

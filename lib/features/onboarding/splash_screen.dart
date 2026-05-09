@@ -40,14 +40,27 @@ class _SplashScreenState extends State<SplashScreen>
     _ctrl.forward().then((_) {
       Future.delayed(const Duration(milliseconds: 700), () async {
         if (!mounted) return;
-        
-        // Token kontrolü yap (otomatik giriş)
+
+        // B14: Token mevcut mu kontrol et
         final String? token = await ApiClient.getToken();
-        
+
+        bool isAuthenticated = false;
+        if (token != null && token.isNotEmpty) {
+          // Token'i backend'e göndererek geçerliliğini doğrula
+          try {
+            await ApiClient.dio.get('/profile/health');
+            isAuthenticated = true;
+          } catch (_) {
+            // 401 veya network hatası — token geçersiz/süresi dolmuş
+            await ApiClient.clearToken();
+          }
+        }
+
         if (!mounted) return;
         Navigator.of(context).pushReplacement(
           PageRouteBuilder(
-            pageBuilder: (_, __, ___) => token != null ? const ShellScreen() : const LoginScreen(),
+            pageBuilder: (_, __, ___) =>
+                isAuthenticated ? const ShellScreen() : const LoginScreen(),
             transitionsBuilder: (_, anim, __, child) =>
                 FadeTransition(opacity: anim, child: child),
             transitionDuration: const Duration(milliseconds: 500),

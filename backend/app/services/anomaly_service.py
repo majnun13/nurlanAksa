@@ -1,7 +1,7 @@
 import os
-import json
 import logging
 import numpy as np
+import pandas as pd
 import joblib
 
 logger = logging.getLogger(__name__)
@@ -9,14 +9,17 @@ logger = logging.getLogger(__name__)
 # Model Yolları
 MODEL_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))), "ml", "models")
 MODEL_PATH = os.path.join(MODEL_DIR, "anomaly_model.pkl")
-SCALER_PATH = os.path.join(MODEL_DIR, "anomaly_scaler.pkl")
-THRESHOLDS_PATH = os.path.join(MODEL_DIR, "anomaly_threshold.json")
 
 class AnomalyService:
+    # Anomali skoru eşik değerleri (0–100 aralığı)
+    # Kaynak: eğitim verisinin percentile dağılımına göre seçildi
+    _THRESHOLD_HAFIF   = 38.0   # p85 — hafif dalgalanma
+    _THRESHOLD_ORTA    = 54.0   # p95 — orta sapma
+    _THRESHOLD_YUKSEK  = 62.0   # p97 — belirgin anomali
+    _THRESHOLD_KRITIK  = 90.0   # Kritik — doktora bavuru
+
     def __init__(self):
         self.model = None
-        self.scaler = None
-        self.thresholds = {}
         self.is_ready = False
         self._load_models()
 
@@ -27,79 +30,90 @@ class AnomalyService:
                 return
 
             self.model = joblib.load(MODEL_PATH)
-            self.scaler = joblib.load(SCALER_PATH)
-            
-            with open(THRESHOLDS_PATH, "r") as f:
-                self.thresholds = json.load(f)
-                
             self.is_ready = True
-            logger.info("Anomali modelleri başarıyla yüklendi.")
+            logger.info("Yeni nesil HistGradientBoosting anomali modeli başarıyla yüklendi.")
         except Exception as e:
             logger.error(f"Anomali modelleri yüklenirken hata: {e}")
 
-    def evaluate_wearable_data(self, wearable_data: dict) -> dict:
+    def evaluate_wearable_data(self, wearable_data: dict, profile_data: dict = None) -> dict:
         """
         Gelen günlük giyilebilir veri özelliklerini alır ve anomali skoru hesaplar.
         """
+        if profile_data is None:
+            profile_data = {}
+            
         # Model eğitilmediyse basit kural tabanlı yedeğe dön (Fallback)
         if not self.is_ready:
-            return self._fallback_anomaly(wearable_data)
+            return self._fallback_anomaly(wearable_data, profile_data)
 
         try:
-            # Gerekli özellikleri çıkar (Eğer veri eksikse varsayılan kullan)
+            # 1. Temel Sensör Verileri (Zorunlu)
             hr = float(wearable_data.get("avg_hr_bpm", 72.0))
             hrv = float(wearable_data.get("hrv_ms", 45.0))
+            steps = float(wearable_data.get("step_count", 5000.0))
+            sleep_score = float(wearable_data.get("sleep_score", 70.0))
             
-            # Giyilebilir cihaz verilerinden ML modeline uygun EDA/TEMP üretimi
-            # Not: Gerçek saatte bu veriler yoksa, nabız/hrv'den dolaylı tahmin (veya sentetik) gönderilebilir
-            # Şimdilik stabil kalması için varsayılan normal EDA/TEMP değerleri kullanıyoruz
-            eda_mean = 1.3
-            eda_std = 0.04
-            eda_slope = 0.0
-            temp_mean = 33.3
-            temp_slope = 0.0
+            # 2. Opsiyonel Sensör Verileri (Eksikse NaN olacak)
+            spo2 = float(wearable_data.get("spo2_pct")) if wearable_data.get("spo2_pct") is not None else np.nan
+            temp = float(wearable_data.get("temp_celsius")) if wearable_data.get("temp_celsius") is not None else np.nan
             
-            # Günlük aktivite bazında modelin beklediği aktivite standard sapması tahmini
-            steps = float(wearable_data.get("step_count", 5000))
-            activity = min(steps / 200, 35.0) # Basit adım -> activity std mappingi
+            # 3. Profil Verileri (Zorunlu - Varsayılan eklendi)
+            age = float(profile_data.get("age", 30))
+            bmi = float(profile_data.get("weight_kg", 70.0)) / ((float(profile_data.get("height_cm", 170.0)) / 100.0) ** 2)
+            
+            # Hastalık yükünü hesapla
+            medical_conditions = profile_data.get("medical_conditions", [])
+            if not isinstance(medical_conditions, list):
+                medical_conditions = []
+                
+            chronic_count = len(medical_conditions)
+            
+            # Kalp hastalığı kontrolü
+            has_heart_disease = 0
+            for cond in medical_conditions:
+                cond_lower = cond.lower()
+                if "kalp" in cond_lower or "hipertansiyon" in cond_lower or "ritim" in cond_lower or "damar" in cond_lower:
+                    has_heart_disease = 1
+                    break
 
-            features = np.array([[hr, hrv, eda_mean, eda_std, eda_slope, temp_mean, temp_slope, activity]])
+            # Tahmin için Pandas DataFrame oluştur (Eğitim sırasıyla aynı sütun isimleri)
+            features_df = pd.DataFrame({
+                'avg_hr_bpm': [hr],
+                'hrv_ms': [hrv],
+                'step_count': [steps],
+                'sleep_score': [sleep_score],
+                'spo2_pct': [spo2],
+                'temp_celsius': [temp],
+                'age': [age],
+                'bmi': [bmi],
+                'has_heart_disease': [has_heart_disease],
+                'chronic_conditions_count': [chronic_count]
+            })
             
-            # Normalizasyon
-            features_scaled = self.scaler.transform(features)
-            
-            # Skor hesapla (IsolationForest)
-            scores = self.model.score_samples(features_scaled)
-            
-            s_min = self.thresholds["score_min"]
-            s_max = self.thresholds["score_max"]
+            # Skor tahmin et
+            predicted_score = self.model.predict(features_df)[0]
             
             # Normalize (0=Normal, 100=Kritik Anomali)
-            normalized = float(np.clip((scores[0] - s_max) / (s_min - s_max) * 100, 0, 100))
+            normalized = float(np.clip(predicted_score, 0, 100))
             
-            # Eşik Değerlendirmesi
-            p85 = self.thresholds.get("p85", 38.0)
-            p95 = self.thresholds.get("p95", 54.0)
-            p97 = self.thresholds.get("p97", 62.0)
-            critical = self.thresholds.get("critical", 90.0)
-            
+            # Eşik Değerlendirmesi — sabıtlere bakınız
             level = "Düşük"
             has_anomaly = False
-            msg = "Her şey yolunda görünüyor. Değerleriniz normal (Baseline) profilinize uyumlu."
-            
-            if normalized > critical:
+            msg = "Her şey yolunda görünüyor. Değerleriniz kişisel profilinize uygun."
+
+            if normalized > self._THRESHOLD_KRITIK:
                 has_anomaly = True
                 level = "Kritik"
                 msg = "Fizyolojik verilerinizde ciddi (Kritik) sapmalar var. Doktora görünmeyi veya dinlenmeyi ihmal etmeyin."
-            elif normalized > p97:
+            elif normalized > self._THRESHOLD_YUKSEK:
                 has_anomaly = True
                 level = "Yüksek"
                 msg = "Belirgin anomali saptandı. Stres altında veya hastalanmak üzere olabilirsiniz."
-            elif normalized > p95:
+            elif normalized > self._THRESHOLD_ORTA:
                 has_anomaly = True
                 level = "Orta"
                 msg = "Normalden orta düzeyde bir sapma mevcut. Gün içinde hafif bir stres yaşamış olabilirsiniz."
-            elif normalized > p85:
+            elif normalized > self._THRESHOLD_HAFIF:
                 has_anomaly = True
                 level = "Hafif"
                 msg = "Verilerinizde hafif düzeyde bir dalgalanma var. Dinlenmeye dikkat edin."
@@ -113,10 +127,10 @@ class AnomalyService:
             
         except Exception as e:
             logger.error(f"Anomali hesaplama hatası: {e}")
-            return self._fallback_anomaly(wearable_data)
+            return self._fallback_anomaly(wearable_data, profile_data)
 
-    def _fallback_anomaly(self, wearable: dict) -> dict:
-        """Model yokken eski kural tabanlı basit motor"""
+    def _fallback_anomaly(self, wearable: dict, profile: dict) -> dict:
+        """Model yokken eski kural tabanlı basit motor (Profile duyarlı)"""
         avg_hr   = wearable.get("avg_hr_bpm", 72)
         sleep_sc = wearable.get("sleep_score", 70)
         hrv      = wearable.get("hrv_ms", 45)
@@ -124,10 +138,16 @@ class AnomalyService:
 
         score = 0.0
         
+        medical_conditions = profile.get("medical_conditions", []) if profile else []
+        has_heart_disease = any("kalp" in c.lower() for c in medical_conditions)
+        
         if spo2 < 94:
             return {"has_anomaly": True, "level": "Yüksek", "message": f"Kan oksijen seviyeniz ({spo2}%) düşük.", "score": 85.0}
-        if avg_hr > 100:
+            
+        hr_limit = 90 if has_heart_disease else 100
+        if avg_hr > hr_limit:
             return {"has_anomaly": True, "level": "Orta", "message": f"Bugünkü ortalama nabzınız ({avg_hr} bpm) yüksek.", "score": 75.0}
+            
         if sleep_sc < 35:
             return {"has_anomaly": True, "level": "Orta", "message": "Uyku kaliteniz kritik seviyede düşük.", "score": 65.0}
         if hrv < 25:

@@ -4,6 +4,8 @@
 # ─────────────────────────────────────────────────────────────
 
 import os
+import asyncio
+import logging
 import torch
 import timm
 from PIL import Image
@@ -34,6 +36,8 @@ _transform = transforms.Compose([
 _model = None
 _classes = None
 
+_logger = logging.getLogger(__name__)
+
 def _load_model():
     """Model'i ilk kullanımda yükler (lazy loading)."""
     global _model, _classes
@@ -43,8 +47,9 @@ def _load_model():
 
     if not os.path.exists(MODEL_PATH):
         raise HTTPException(
-            status_code=500,
-            detail=f"Model dosyası bulunamadı: {MODEL_PATH}"
+            status_code=503,
+            # GÜVENLİK: İç dosya yolu istemciye sızdırılmaz
+            detail="Yemek tanıma modeli şu an hazır değil. Lütfen daha sonra tekrar deneyin."
         )
 
     checkpoint = torch.load(MODEL_PATH, map_location=DEVICE, weights_only=False)
@@ -59,13 +64,13 @@ def _load_model():
     _model.load_state_dict(checkpoint["model_state_dict"])
     _model.to(DEVICE)
     _model.eval()
-    print(f"✅ MacroVision model yüklendi ({num_classes} sınıf, cihaz: {DEVICE})")
+    _logger.info("MacroVision model yüklendi (%d sınıf, cihaz: %s)", num_classes, DEVICE)
 
 
 # ── Public API ────────────────────────────────────────────────
 
 def predict_food(image_bytes: bytes) -> dict:
-    """Fotoğraftan yemek tahmini yap."""
+    """Fotoğraftan yemek tahmini yap. Senkron — run_in_executor ile çağırılmalı."""
     _load_model()
 
     image = Image.open(BytesIO(image_bytes)).convert("RGB")
@@ -93,9 +98,10 @@ def predict_food(image_bytes: bytes) -> dict:
 async def get_nutrition_for_food(food_name: str, gram: float) -> dict | None:
     """Yemek adı ve gram miktarına göre besin değerini veritabanından hesapla."""
     pool = await get_pool()
+    # ILIKE ile büyük/küçük harf duyarsız arama
     row = await pool.fetchrow(
-        "SELECT protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items WHERE name = $1 LIMIT 1",
-        food_name.strip().lower()
+        "SELECT protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items WHERE name ILIKE $1 LIMIT 1",
+        food_name.strip()
     )
     
     if not row:
@@ -125,7 +131,7 @@ async def search_foods(query: str) -> list[dict]:
 
     if not query_raw:
         rows = await pool.fetch(
-            "SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items ORDER BY name"
+            "SELECT name, protein_per_100g, carbs_per_100g, fat_per_100g, calories_per_100g FROM food_items ORDER BY name LIMIT 100"
         )
     else:
         # Türkçe → ASCII dönüşüm tablosu
@@ -178,7 +184,7 @@ async def search_foods(query: str) -> list[dict]:
 
 
 async def get_all_food_names() -> list[str]:
-    """Tüm yemek isimlerini veritabanından listele."""
+    """Tüm yemek isimlerini veritabanından listele. B19: LIMIT 500 — OOM koruması."""
     pool = await get_pool()
-    rows = await pool.fetch("SELECT name FROM food_items ORDER BY name")
+    rows = await pool.fetch("SELECT name FROM food_items ORDER BY name LIMIT 500")
     return [r["name"] for r in rows]

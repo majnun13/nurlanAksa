@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Depends
 from ...schemas.auth import (
     RegisterRequest, RegisterResponse,
     LoginRequest, LoginResponse,
@@ -7,18 +7,10 @@ from ...schemas.auth import (
     MessageResponse,
 )
 from ...services import auth_service
-from ...core.security import decode_access_token
+from ..dependencies import get_current_user_id
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
-def _get_user_id(authorization: str) -> str:
-    if authorization is None or not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Token gerekli.")
-    token = authorization.removeprefix("Bearer ").strip()
-    user_id = decode_access_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Geçersiz token.")
-    return user_id
 
 @router.post("/register", response_model=RegisterResponse, status_code=201)
 async def register(body: RegisterRequest):
@@ -57,10 +49,10 @@ async def resend_code(body: ResendCodeRequest):
     await auth_service.resend_otp(user_id=body.user_id)
     return MessageResponse(message="Yeni doğrulama kodu gönderildi.")
 
+
 @router.delete("/delete-account", response_model=MessageResponse)
-async def delete_account(authorization: str = Header(...)):
+async def delete_account(user_id: str = Depends(get_current_user_id)):
     """Kullanıcının hesabını ve bağlı tüm verilerini kalıcı olarak siler."""
-    user_id = _get_user_id(authorization)
     await auth_service.delete_user(user_id)
     return MessageResponse(message="Hesabınız başarıyla silindi.")
 

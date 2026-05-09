@@ -25,6 +25,9 @@ class Settings(BaseSettings):
     GOOGLE_CLIENT_SECRET: str = ""
     GOOGLE_IOS_CLIENT_ID: str = ""
 
+    # Gemini AI
+    GEMINI_API_KEY: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"

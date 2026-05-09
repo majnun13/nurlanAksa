@@ -1,6 +1,8 @@
-from fastapi import APIRouter, Header, HTTPException
+from fastapi import APIRouter, Header, HTTPException, Depends
+import logging
+import traceback
 from app.core.database import get_pool
-from app.core.security import decode_access_token
+from app.api.dependencies import get_current_user_id
 
 from app.schemas.dashboard import (
     DashboardResponse,
@@ -185,7 +187,7 @@ def _calc_risk_score(wearable: dict, profile: dict) -> int:
     
     # ML Anomali Skoru Katkısı (Modül 3 Fusion)
     # Anomali servisinden dönen 0-100 arası skoru %25 ağırlıkla ekle
-    anom_res = anomaly_service.evaluate_wearable_data(wearable)
+    anom_res = anomaly_service.evaluate_wearable_data(wearable, profile)
     ml_anomaly_score = anom_res.get("score", 0.0)
     
     score += ml_anomaly_score * 0.25
@@ -195,55 +197,139 @@ def _calc_risk_score(wearable: dict, profile: dict) -> int:
 
 def _build_recommendations(wearable: dict, profile: dict, steps_goal: int) -> list:
     recs = []
-    steps    = wearable.get("step_count")    or _WEARABLE_DEFAULTS["step_count"]
-    sleep_sc = wearable.get("sleep_score")   or _WEARABLE_DEFAULTS["sleep_score"]
-    avg_hr   = wearable.get("avg_hr_bpm")    or _WEARABLE_DEFAULTS["avg_hr_bpm"]
-    hrv      = wearable.get("hrv_ms")        or _WEARABLE_DEFAULTS["hrv_ms"]
-    goal     = profile.get("health_goal")    or _PROFILE_DEFAULTS["health_goal"]
 
-    if steps < steps_goal / 2:
+    # ── Wearable Verileri ────────────────────────────────────────────
+    steps    = wearable.get("step_count")    or 5000
+    sleep_sc = wearable.get("sleep_score")   or 70
+    avg_hr   = wearable.get("avg_hr_bpm")    or 72
+    hrv      = wearable.get("hrv_ms")        or 45
+    sleep_h  = float(wearable.get("sleep_hours") or 7.0)
+    # SpO2: Cihaz ölçemiyorsa None kalır — eksik veri varsayım yapılmaz
+    spo2_raw = wearable.get("spo2_pct")
+    spo2     = float(spo2_raw) if spo2_raw is not None and float(spo2_raw) > 0 else None
+
+
+    # ── Profil Verileri ──────────────────────────────────────────────
+    goal       = profile.get("health_goal")           or "maintain"
+    lifestyle  = profile.get("lifestyle")             or "Orta"
+    conditions = profile.get("medical_conditions")    or []
+    diet       = profile.get("dietary_restrictions")  or []
+    weight_kg  = float(profile.get("weight_kg")       or 70.0)
+    height_cm  = float(profile.get("height_cm")       or 170.0)
+    age        = int(profile.get("age")               or 30)
+    gender     = (profile.get("gender") or "erkek").lower()
+
+    bmi = weight_kg / ((height_cm / 100) ** 2)
+
+    # Hastalık bayrakları
+    has_heart   = any(k in (c or "").lower() for c in conditions for k in ("kalp", "hipertansiyon", "ritim", "damar"))
+    has_diabetes = any(k in (c or "").lower() for c in conditions for k in ("diyabet", "şeker"))
+    has_thyroid  = any("tiroid" in (c or "").lower() for c in conditions)
+    has_anemia   = any("anemi" in (c or "").lower() for c in conditions)
+
+    # ── 1. KAN OKSİJENİ (Varsa — Cihaz Destekliyorsa) ──────────────
+    if spo2 is not None and spo2 < 94:
+        recs.append(RecommendationItem(type="sleep",
+            text=f"⚠️ Kan oksijeniniz %{spo2:.0f} ile düşük seyrediyor. Derin nefes egzersizleri yapın ve havadar bir ortamda dinlenin."))
+
+    # ── 2. HRV — Stres / Toparlanma ─────────────────────────────────
+    if hrv < 25:
+        recs.append(RecommendationItem(type="sleep",
+            text=f"Kalp değişkenliğiniz (HRV: {hrv:.0f} ms) düşük — vücudunuz ciddi stres altında. Bugün ağır egzersizden kaçının, derin nefes veya meditasyon deneyin."))
+    elif hrv < 35:
+        recs.append(RecommendationItem(type="sleep",
+            text=f"HRV değeriniz ({hrv:.0f} ms) biraz düşük. Kısa bir şekerleme veya yatmadan önce 10 dakikalık gevşeme size iyi gelebilir."))
+
+    # ── 3. NABIZ ─────────────────────────────────────────────────────
+    hr_limit = 85 if has_heart else 100
+    if avg_hr > hr_limit:
+        if has_heart:
+            recs.append(RecommendationItem(type="exercise",
+                text=f"💓 Kalp durumunuz göz önüne alındığında {avg_hr:.0f} bpm oldukça yüksek. Lütfen yoğun aktivitelerden kaçının ve gerekirse doktorunuzu arayın."))
+        else:
+            recs.append(RecommendationItem(type="exercise",
+                text=f"Nabzınız ({avg_hr:.0f} bpm) normalin üzerinde. Bugün düşük tempolu yürüyüş veya esneme egzersizleri tercih edin."))
+    elif avg_hr < 50 and not lifestyle == "Aktif":
         recs.append(RecommendationItem(type="exercise",
-            text=f"Bugün sadece {steps:,} adım attınız. Hedef {steps_goal:,} için kısa bir yürüyüş yapın."))
+            text=f"Dinlenme nabzınız ({avg_hr:.0f} bpm) oldukça düşük. Kendinizi iyi hissediyorsanız sorun yok; ancak baş dönmesi yaşıyorsanız doktora danışın."))
+
+    # ── 4. ADIM ──────────────────────────────────────────────────────
+    if steps < steps_goal * 0.4:
+        if has_heart or age > 60:
+            recs.append(RecommendationItem(type="exercise",
+                text=f"Bugün {steps:,} adım attınız. Sağlık durumunuza uygun tempolu, kısa yürüyüşlerle hedefinize yaklaşabilirsiniz."))
+        else:
+            recs.append(RecommendationItem(type="exercise",
+                text=f"Bugün sadece {steps:,} adım attınız. {steps_goal:,} hedefinize ulaşmak için 20-30 dakikalık bir yürüyüş harika olur! 🚶"))
     elif steps >= steps_goal:
         recs.append(RecommendationItem(type="exercise",
-            text=f"Harika! Bugün {steps:,} adım atarak {steps_goal:,} hedefini geçtiniz! 🎉"))
-    else:
-        recs.append(RecommendationItem(type="exercise",
-            text=f"Bugün {steps:,} adım attınız. {steps_goal:,} hedefine ulaşmak için biraz daha yürüyün."))
+            text=f"🎉 Tebrikler! Bugün {steps:,} adım atarak {steps_goal:,} hedefini aştınız. Harika bir gün!"))
 
-    if sleep_sc < 50:
+    # ── 5. UYKU ──────────────────────────────────────────────────────
+    if sleep_sc < 40 or sleep_h < 5.0:
         recs.append(RecommendationItem(type="sleep",
-            text="Uyku kaliteniz düşük. Bu gece erken yatın ve ekranlardan uzak durun."))
-    elif sleep_sc > 80:
+            text=f"Uyku kaliteniz çok düşük ({sleep_h:.1f} sa). Bu gece ekranları bir saat önce kapatın, oda ısısını 18-20°C'ye getirin."))
+    elif sleep_sc < 60 or sleep_h < 6.5:
         recs.append(RecommendationItem(type="sleep",
-            text="Uyku kaliteniz mükemmel! Bu düzeni korumaya devam edin. 😴"))
-    else:
+            text="Uyku kaliteniz yetersiz. Yatmadan önce kafein tüketimini azaltın ve düzenli uyku saati belirlemeye çalışın."))
+    elif sleep_sc > 85 and sleep_h >= 7.5:
         recs.append(RecommendationItem(type="sleep",
-            text="Uyku kalitenizi artırmak için yatmadan önce hafif esneme yapabilirsiniz."))
+            text=f"Uyku kaliteniz mükemmel ({sleep_h:.1f} sa). Bu düzeni korumak bağışıklık sisteminizi güçlendirir. 😴"))
 
-    if avg_hr > 90:
-        recs.append(RecommendationItem(type="exercise",
-            text=f"Nabzınız ({avg_hr} bpm) yüksek seyrediyor. Bugün düşük yoğunluklu egzersiz tercih edin."))
-    elif hrv < 30:
-        recs.append(RecommendationItem(type="sleep",
-            text="HRV değeriniz düşük — vücudunuz stres altında. Derin nefes egzersizleri deneyin."))
-    else:
-        if goal == "lose_weight":
+    # ── 6. SAĞLIK HEDEFİ + KİLO/BMI ─────────────────────────────────
+    if goal == "lose_weight":
+        if bmi > 30:
             recs.append(RecommendationItem(type="nutrition",
-                text="Kilo hedefiniz için günlük kalori açığını koruyun ve su tüketimine dikkat edin."))
-        elif goal == "gain_weight":
-            recs.append(RecommendationItem(type="nutrition",
-                text="Kas kazanımı için yeterli protein (vücut ağırlığının 1.6-2g/kg) almaya özen gösterin."))
+                text=f"VKİ'niz {bmi:.1f} ile obezite sınırında. Yüksek lifli gıdalar (sebze, baklagil) tercih edin ve şekerli içecekleri tamamen bırakın."))
         else:
             recs.append(RecommendationItem(type="nutrition",
-                text="Günün geri kalanında su tüketiminize ve dengeli beslenmeye dikkat edin."))
+                text="Kilo vermek için günlük kalori açığınızı 300-500 kcal arasında tutun. Protein ağırlıklı beslenme kas kaybını önler."))
+    elif goal == "gain_weight":
+        prot = round(weight_kg * 1.8, 0)
+        recs.append(RecommendationItem(type="nutrition",
+            text=f"Kas kazanımı için günde {prot:.0f}g protein (ağırlığınızın 1.8 katı) hedefleyin. Egzersiz sonrası 30 dk içinde protein alın."))
+    elif goal == "maintain":
+        recs.append(RecommendationItem(type="nutrition",
+            text="Kilonuzu korumak için tabağınızın yarısını sebze, çeyreğini protein, çeyreğini tam tahıl ile doldurun."))
 
-    return recs[:3]
+    # ── 7. KRONİK HASTALIK BAZLI ────────────────────────────────────
+    if has_diabetes:
+        recs.append(RecommendationItem(type="nutrition",
+            text="Diyabetiniz için glisemik indeksi düşük gıdalar (yulaf, mercimek, yeşil sebzeler) tercih edin. Öğünleri küçük ve sık tutun."))
+    if has_thyroid:
+        recs.append(RecommendationItem(type="nutrition",
+            text="Tiroid sağlığı için iyot açısından zengin gıdalar (deniz ürünleri, yumurta) tüketin. Çiğ lahana ve brokoli tüketimini sınırlayın."))
+    if has_anemia:
+        recs.append(RecommendationItem(type="nutrition",
+            text="Aneminiz için demir açısından zengin gıdalar (kırmızı et, ıspanak, mercimek) tüketin. C vitamini ile birlikte alınca emilim artar."))
+
+    # ── 8. DİYET KISITLAMASI ────────────────────────────────────────
+    if "Glütensiz" in diet:
+        recs.append(RecommendationItem(type="nutrition",
+            text="Glüten intoleransınız için pirinç, kinoa, mısır ve patates gibi doğal glütensiz alternatifler zengin besin kaynağıdır."))
+    if "Laktoz İntoleransı" in diet:
+        recs.append(RecommendationItem(type="nutrition",
+            text="Kalsiyum ihtiyacınız için badem sütü, yeşil yapraklı sebzeler ve tofu gibi laktozsuz kaynakları tercih edin."))
+    if "Vejeteryan" in diet or "Vegan" in diet:
+        recs.append(RecommendationItem(type="nutrition",
+            text="Bitkisel beslenmenizde B12 ve D vitamini, demir ve çinko eksikliğine dikkat edin. Düzenli kan testi yaptırmanız önerilir."))
+
+    # ── 9. YAŞ VE CİNSİYET ──────────────────────────────────────────
+    if age > 60:
+        recs.append(RecommendationItem(type="exercise",
+            text="60+ yaşta denge ve esneklik egzersizleri düşme riskini azaltır. Haftada 2-3 kez hafif kuvvet antrenmanı kemik yoğunluğunu korur."))
+    elif age < 25 and gender == "erkek":
+        recs.append(RecommendationItem(type="exercise",
+            text="Genç yaşta yapılan düzenli egzersiz metabolizma hızınızı kalıcı olarak artırır. Haftada en az 150 dk orta yoğunluklu aktivite hedefleyin."))
+
+    # ── En fazla 4 öneri döndür ──────────────────────────────────────
+    return recs[:4]
 
 
-def _anomaly_from_wearable(wearable: dict) -> AnomalyData:
+
+def _anomaly_from_wearable(wearable: dict, profile: dict) -> AnomalyData:
     # Eski kural tabanlı yapıyı yeni ML servisine yönlendir
-    result = anomaly_service.evaluate_wearable_data(wearable)
+    result = anomaly_service.evaluate_wearable_data(wearable, profile)
     return AnomalyData(
         has_anomaly=result["has_anomaly"],
         level=result["level"],
@@ -252,16 +338,11 @@ def _anomaly_from_wearable(wearable: dict) -> AnomalyData:
 
 
 @router.get("/summary", response_model=DashboardResponse)
-async def get_dashboard_summary(authorization: str = Header(...)):
+async def get_dashboard_summary(user_id: str = Depends(get_current_user_id)):
     """
     Kullanıcının ana ekranında gösterilecek özet verileri döndürür.
     Eksik/None veri durumunda güvenli varsayılan değerler kullanılır.
     """
-    token = authorization.removeprefix("Bearer ").strip()
-    user_id = decode_access_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Geçersiz token.")
-
     try:
         pool = await get_pool()
 
@@ -273,7 +354,7 @@ async def get_dashboard_summary(authorization: str = Header(...)):
 
         # ── Sağlık profili ── _safe_profile ile normalize ─────────
         profile_row = await pool.fetchrow(
-            "SELECT health_goal, lifestyle, medical_conditions, weight_kg, height_cm, age FROM health_profiles WHERE user_id = $1",
+            "SELECT health_goal, lifestyle, medical_conditions, weight_kg, height_cm, age, gender FROM health_profiles WHERE user_id = $1",
             user_id,
         )
         profile = _safe_profile(dict(profile_row) if profile_row else None)
@@ -304,7 +385,7 @@ async def get_dashboard_summary(authorization: str = Header(...)):
             user_id,
         )
 
-        day_names = ["Paz", "Pzt", "Sal", "Çar", "Per", "Cum", "Cmt"]
+        day_names = ["Pzt", "Sal", "Çar", "Per", "Cum", "Cmt", "Paz"]
         weekly_days   = []
         weekly_steps  = []
         for r in reversed(week_rows):
@@ -356,7 +437,7 @@ async def get_dashboard_summary(authorization: str = Header(...)):
 
         return DashboardResponse(
             user_name=user_name,
-            anomaly=_anomaly_from_wearable(wearable),
+            anomaly=_anomaly_from_wearable(wearable, profile),
             risk=RiskData(
                 score=risk_score,
                 trend=risk_trend,
@@ -376,6 +457,7 @@ async def get_dashboard_summary(authorization: str = Header(...)):
                 sleep_hours=sleep_hours,
                 sleep_quality=round(sleep_score / 100, 2),
                 resting_hr=resting_hr,
+                avg_hr=int(wearable.get("avg_hr_bpm") or resting_hr),
                 resting_hr_label=hr_label,
                 resting_hr_severity=hr_severity,
             ),
@@ -389,8 +471,7 @@ async def get_dashboard_summary(authorization: str = Header(...)):
     except HTTPException:
         raise
     except Exception as e:
-        import traceback, logging
-        logging.error(f"[Dashboard] Beklenmedik hata: {e}\n{traceback.format_exc()}")
+        logging.error("[Dashboard] Beklenmedik hata: %s\n%s", e, traceback.format_exc())
         raise HTTPException(
             status_code=500,
             detail="Dashboard verileri şu an alınamıyor. Lütfen tekrar deneyin.",

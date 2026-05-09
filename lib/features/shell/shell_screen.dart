@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../dashboard/dashboard_screen.dart';
 import '../insights/insights_screen.dart';
+import '../chat/chat_screen.dart';
 import '../nutrition/nutrition_screen.dart';
 import '../exercise/exercise_screen.dart';
 import '../settings/settings_screen.dart';
@@ -10,10 +11,11 @@ class ShellScreen extends StatefulWidget {
   const ShellScreen({super.key});
 
   @override
-  State<ShellScreen> createState() => _ShellScreenState();
+  State<ShellScreen> createState() => ShellScreenState();
 }
 
-class _ShellScreenState extends State<ShellScreen> {
+// Public state class — DashboardScreen can access it via context
+class ShellScreenState extends State<ShellScreen> {
   int _index = 0;
 
   // NutritionScreen ve SettingsScreen'e erişim için GlobalKey
@@ -28,24 +30,25 @@ class _ShellScreenState extends State<ShellScreen> {
     _pages = [
       const DashboardScreen(),
       const InsightsScreen(),
+      const ChatScreen(),
       NutritionScreen(key: _nutritionKey),
       const ExerciseScreen(),
       SettingsScreen(key: _settingsKey),
     ];
   }
 
-  void _onTabChanged(int newIndex) {
-    setState(() => _index = newIndex);
-
-    // Beslenme sekmesine her geçişte hedefleri yeniden yükle
-    if (newIndex == 2) {
+  /// Dışarıdan çağrılabilir sekme değiştirici
+  void switchToTab(int index) {
+    setState(() => _index = index);
+    if (index == 3) {
       _nutritionKey.currentState?.refreshTargets();
     }
-    // Profil sekmesine her geçişte profili yeniden yükle
-    if (newIndex == 4) {
+    if (index == 5) {
       _settingsKey.currentState?.refreshProfile();
     }
   }
+
+  void _onTabChanged(int newIndex) => switchToTab(newIndex);
 
   @override
   Widget build(BuildContext context) {
@@ -77,6 +80,11 @@ class _ShellScreenState extends State<ShellScreen> {
               icon: Icon(Icons.insights_outlined),
               selectedIcon: Icon(Icons.insights_rounded),
               label: 'Risk',
+            ),
+            NavigationDestination(
+              icon: Icon(Icons.auto_awesome_outlined),
+              selectedIcon: Icon(Icons.auto_awesome_rounded),
+              label: 'AI Asistan',
             ),
             NavigationDestination(
               icon: Icon(Icons.restaurant_outlined),

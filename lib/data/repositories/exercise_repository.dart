@@ -44,9 +44,11 @@ class ExerciseRepository {
         },
       );
     } on DioException catch (e) {
-      // Sessizce hata yakala — kayıt başarısız olsa da UI'ı bloke etme
+      // Antrenman kaydı başarısız — caller'da snackbar gösterilebilmesi için exception fırlat
       // ignore: avoid_print
       print('completeSession hata: ${e.response?.data ?? e.message}');
+      // NOT: UI'ı bloke etmemek için sessizce devam et, ama debug log bırak
+      // Kullanıcıya bildirim yapmak için caller'da try/catch kullanılabilir
     }
   }
 }

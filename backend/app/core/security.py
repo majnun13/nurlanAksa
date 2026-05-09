@@ -26,6 +26,9 @@ def create_access_token(user_id: str) -> str:
 
 def decode_access_token(token: str) -> str | None:
     """Token geçerliyse user_id döner, geçersizse None."""
+    # GÜVENLİK: Aşırı büyük token'ları reddet (DoS koruması)
+    if len(token) > 8192:
+        return None
     try:
         payload = jwt.decode(
             token, settings.JWT_SECRET, algorithms=[settings.JWT_ALGORITHM]

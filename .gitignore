@@ -65,6 +65,8 @@ pytest_cache/
 **/ml_models/*.pth
 **/ml_models/*.pt
 **/ml_models/*.h5
+**/*.pkl
+**/*.csv
 
 # 4. Veritabanı Dosyaları (Local kullanılıyorsa)
 *.sqlite
@@ -78,3 +80,6 @@ GoogleService-Info.plist
 *.keystore
 *.jks
 key.properties
+
+# 6. Geliştirme Yardımcı Scriptleri (Production'da bulunmamalı)
+backend/dump.py

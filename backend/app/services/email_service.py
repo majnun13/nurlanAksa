@@ -1,7 +1,20 @@
+"""
+Email Service — Gmail SMTP ile OTP doğrulama maili gönderir.
+
+B24: Her mail için SMTP bağlantısını sıfırdan açmak yerine retry mekanizması
+     eklenmiştir. Geçici bağlantı hatalarında _SMTP_MAX_RETRIES kadar dener.
+"""
+import logging
+import asyncio
 import aiosmtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from ..core.config import settings
+
+_logger = logging.getLogger(__name__)
+
+_SMTP_MAX_RETRIES = 2
+_SMTP_RETRY_DELAY = 1.0  # saniye
 
 
 async def send_verification_email(
@@ -9,7 +22,7 @@ async def send_verification_email(
     user_name: str,
     code: str,
 ) -> None:
-    """Gmail SMTP ile 6 haneli OTP içeren HTML mail gönderir."""
+    """Gmail SMTP ile 6 haneli OTP içeren HTML mail gönderir. Retry: 2."""
 
     msg = MIMEMultipart("alternative")
     msg["Subject"] = "AKSA – E-posta Doğrulama Kodunuz"
@@ -60,11 +73,29 @@ async def send_verification_email(
 """
     msg.attach(MIMEText(html, "html"))
 
-    await aiosmtplib.send(
-        msg,
-        hostname=settings.SMTP_HOST,
-        port=settings.SMTP_PORT,
-        username=settings.SMTP_EMAIL,
-        password=settings.SMTP_PASSWORD,
-        start_tls=True,
+    last_error: Exception | None = None
+    for attempt in range(1, _SMTP_MAX_RETRIES + 1):
+        try:
+            await aiosmtplib.send(
+                msg,
+                hostname=settings.SMTP_HOST,
+                port=settings.SMTP_PORT,
+                username=settings.SMTP_EMAIL,
+                password=settings.SMTP_PASSWORD,
+                start_tls=True,
+            )
+            _logger.info("Doğrulama maili gönderildi: %s (deneme %d)", to_email, attempt)
+            return
+        except Exception as e:
+            last_error = e
+            _logger.warning(
+                "Mail gönderimi başarısız (deneme %d/%d): %s",
+                attempt, _SMTP_MAX_RETRIES, e,
+            )
+            if attempt < _SMTP_MAX_RETRIES:
+                await asyncio.sleep(_SMTP_RETRY_DELAY)
+
+    _logger.error(
+        "Mail gönderilemedi %s — tüm denemeler başarısız: %s", to_email, last_error
     )
+    raise RuntimeError(f"Doğrulama maili gönderilemedi: {last_error}")

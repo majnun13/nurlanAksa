@@ -9,6 +9,7 @@ import '../../core/network/api_client.dart';
 import '../../core/services/wearable_sync_service.dart';
 import '../../core/services/notification_service.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../shell/shell_screen.dart';
 
 class DashboardScreen extends StatefulWidget {
   const DashboardScreen({super.key});
@@ -23,12 +24,20 @@ class _DashboardScreenState extends State<DashboardScreen> {
   bool _isLoading = true;
   String? _error;
   bool _showAnomalyAlerts = true;
+  final ScrollController _scrollController = ScrollController();
+  final GlobalKey _riskCardKey = GlobalKey();
 
   @override
   void initState() {
     super.initState();
     _repository = DashboardRepository(ApiClient.dio);
     _loadDashboardData();
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadDashboardData() async {
@@ -125,6 +134,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       body: RefreshIndicator(
         onRefresh: _loadDashboardData,
         child: ListView(
+          controller: _scrollController,
           padding: const EdgeInsets.only(bottom: 32),
           children: [
             // ── Anomaly Banner
@@ -135,15 +145,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
             _buildRiskScoreCard(context, data.risk),
 
             // ── Activity Stats Row
-            SectionHeader(
+            const SectionHeader(
               'Aktivite',
               subtitle: 'Bugünkü hareket verileri',
-              action: TextButton(
-                onPressed: () {},
-                child: const Text('Tümü',
-                    style: TextStyle(
-                        color: AksaColors.primaryLight, fontSize: 13)),
-              ),
             ),
             _buildActivityGrid(context, data.activity),
 
@@ -238,7 +242,11 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   ),
                   const SizedBox(height: 10),
                   OutlinedButton(
-                    onPressed: () {},
+                    onPressed: () {
+                      context
+                          .findAncestorStateOfType<ShellScreenState>()
+                          ?.switchToTab(1);
+                    },
                     style: OutlinedButton.styleFrom(
                       side: const BorderSide(color: Colors.white54),
                       foregroundColor: Colors.white,
@@ -259,6 +267,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
   }
 
+
   Widget _buildRiskScoreCard(BuildContext context, RiskData risk) {
     final score = risk.score;
     final trend = risk.trend;
@@ -271,6 +280,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
         score < 30 ? AksaColors.riskLow : score < 70 ? AksaColors.riskMedium : AksaColors.riskHigh;
 
     return Padding(
+      key: _riskCardKey,
       padding: const EdgeInsets.fromLTRB(16, 20, 16, 0),
       child: GradientCard(
         gradient: grad,
@@ -446,145 +456,232 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Widget _buildSleepHRRow(BuildContext context, SleepHeartData sleepHeart) {
+    final sev = sleepHeart.restingHrSeverity;
+    final Color hrStatusColor = sev == 'danger'
+        ? AksaColors.riskHigh
+        : sev == 'warning'
+            ? AksaColors.riskMedium
+            : AksaColors.riskLow;
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Row(
+      child: Column(
         children: [
-          Expanded(
-            child: AksaCard(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+          // ── Tam genişlik Uyku Kartı ───────────────────────────
+          AksaCard(
+            padding: const EdgeInsets.all(16),
+            child: Row(
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF7C3AED).withOpacity(0.15),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(Icons.bedtime_outlined,
+                      color: Color(0xFF7C3AED), size: 20),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF7C3AED).withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.bedtime_outlined,
-                            color: Color(0xFF7C3AED), size: 16),
-                      ),
-                      const SizedBox(width: 8),
-                      const Text('Uyku',
+                      const Text('Uyku Süresi',
                           style: TextStyle(
                               color: AksaColors.textSecondary, fontSize: 13)),
+                      const SizedBox(height: 4),
+                      RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '${sleepHeart.sleepHours}',
+                              style: const TextStyle(
+                                  color: Color(0xFF7C3AED),
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800),
+                            ),
+                            const TextSpan(
+                              text: ' sa',
+                              style: TextStyle(
+                                  color: AksaColors.textMuted, fontSize: 14),
+                            ),
+                          ],
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  RichText(
-                    text: TextSpan(
-                      children: [
-                        TextSpan(
-                          text: '${sleepHeart.sleepHours}',
-                          style: const TextStyle(
-                              color: Color(0xFF7C3AED),
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800),
-                        ),
-                        const TextSpan(
-                          text: ' sa',
-                          style: TextStyle(
-                              color: AksaColors.textMuted, fontSize: 14),
-                        ),
-                      ],
+                ),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    Text(
+                      '%${((sleepHeart.sleepHours / 8.0).clamp(0.0, 1.0) * 100).round()}',
+                      style: const TextStyle(
+                          color: Color(0xFF7C3AED),
+                          fontSize: 20,
+                          fontWeight: FontWeight.w800),
                     ),
-                  ),
-                  const SizedBox(height: 6),
-                  ClipRRect(
-                    borderRadius: BorderRadius.circular(999),
-                    child: LinearProgressIndicator(
-                      value: (sleepHeart.sleepHours / 8.0).clamp(0.0, 1.0),
-                      minHeight: 4,
-                      backgroundColor:
-                          const Color(0xFF7C3AED).withOpacity(0.1),
-                      valueColor: const AlwaysStoppedAnimation(Color(0xFF7C3AED)),
+                    const Text('hedef 8 sa',
+                        style: TextStyle(
+                            color: AksaColors.textMuted, fontSize: 10)),
+                    const SizedBox(height: 8),
+                    SizedBox(
+                      width: 80,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(999),
+                        child: LinearProgressIndicator(
+                          value: (sleepHeart.sleepHours / 8.0).clamp(0.0, 1.0),
+                          minHeight: 5,
+                          backgroundColor:
+                              const Color(0xFF7C3AED).withOpacity(0.1),
+                          valueColor: const AlwaysStoppedAnimation(
+                              Color(0xFF7C3AED)),
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'Hedef: 8 sa / %${((sleepHeart.sleepHours / 8.0).clamp(0.0, 1.0) * 100).round()}',
-                    style: const TextStyle(
-                        color: AksaColors.textMuted, fontSize: 11),
-                  ),
-                ],
-              ),
+                  ],
+                ),
+              ],
             ),
           ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: AksaCard(
-              padding: const EdgeInsets.all(16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
+
+          const SizedBox(height: 12),
+
+          // ── İki Nabız Kartı Yan Yana ─────────────────────────
+          Row(
+            children: [
+              // Dinlenme Nabzı
+              Expanded(
+                child: AksaCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Container(
-                        padding: const EdgeInsets.all(6),
-                        decoration: BoxDecoration(
-                          color: AksaColors.riskHigh.withOpacity(0.15),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(Icons.favorite_outlined,
-                            color: AksaColors.riskHigh, size: 16),
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: hrStatusColor.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: Icon(Icons.bedtime_sharp,
+                                color: hrStatusColor, size: 15),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text('Dinlenme\nNabzı',
+                                style: TextStyle(
+                                    color: AksaColors.textSecondary,
+                                    fontSize: 11)),
+                          ),
+                        ],
                       ),
-                      const SizedBox(width: 8),
-                      const Text('Kalp Atışı',
-                          style: TextStyle(
-                              color: AksaColors.textSecondary, fontSize: 13)),
+                      const SizedBox(height: 12),
+                      RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '${sleepHeart.restingHr}',
+                              style: TextStyle(
+                                  color: hrStatusColor,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800),
+                            ),
+                            const TextSpan(
+                              text: ' bpm',
+                              style: TextStyle(
+                                  color: AksaColors.textMuted, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: hrStatusColor.withOpacity(0.1),
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: hrStatusColor.withOpacity(0.3)),
+                        ),
+                        child: Text(
+                          sleepHeart.restingHrLabel,
+                          style:
+                              TextStyle(color: hrStatusColor, fontSize: 10),
+                        ),
+                      ),
                     ],
                   ),
-                  const SizedBox(height: 12),
-                  RichText(
-                    text: TextSpan(
-                      children: [
-                        TextSpan(
-                          text: '${sleepHeart.restingHr}',
-                          style: const TextStyle(
-                              color: AksaColors.riskHigh,
-                              fontSize: 28,
-                              fontWeight: FontWeight.w800),
-                        ),
-                        const TextSpan(
-                          text: ' bpm',
-                          style: TextStyle(
-                              color: AksaColors.textMuted, fontSize: 14),
-                        ),
-                      ],
-                    ),
-                  ),
-                   const SizedBox(height: 6),
-                  Builder(builder: (context) {
-                    final sev = sleepHeart.restingHrSeverity;
-                    final Color color = sev == 'danger'
-                        ? AksaColors.riskHigh
-                        : sev == 'warning'
-                            ? AksaColors.riskMedium
-                            : AksaColors.riskLow;
-                    return Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: color.withOpacity(0.1),
-                        borderRadius: BorderRadius.circular(8),
-                        border: Border.all(color: color.withOpacity(0.3)),
-                      ),
-                      child: Text(
-                        sleepHeart.restingHrLabel,
-                        style: TextStyle(color: color, fontSize: 10),
-                      ),
-                    );
-                  }),
-                ],
+                ),
               ),
-            ),
+
+              const SizedBox(width: 12),
+
+              // Gün Ortalaması Nabzı
+              Expanded(
+                child: AksaCard(
+                  padding: const EdgeInsets.all(16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Container(
+                            padding: const EdgeInsets.all(6),
+                            decoration: BoxDecoration(
+                              color: AksaColors.riskHigh.withOpacity(0.15),
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                            child: const Icon(Icons.favorite_outlined,
+                                color: AksaColors.riskHigh, size: 15),
+                          ),
+                          const SizedBox(width: 8),
+                          const Expanded(
+                            child: Text('Gün\nOrtalaması',
+                                style: TextStyle(
+                                    color: AksaColors.textSecondary,
+                                    fontSize: 11)),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '${sleepHeart.avgHr}',
+                              style: const TextStyle(
+                                  color: AksaColors.riskHigh,
+                                  fontSize: 28,
+                                  fontWeight: FontWeight.w800),
+                            ),
+                            const TextSpan(
+                              text: ' bpm',
+                              style: TextStyle(
+                                  color: AksaColors.textMuted, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'Tüm gün boyunca\nölçülen ortalama',
+                        style: TextStyle(
+                            color: AksaColors.textMuted, fontSize: 10),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
+
 
   Widget _buildStepsChart(BuildContext context, WeeklyChartData chartData) {
     if (chartData.steps.isEmpty || chartData.days.isEmpty) {

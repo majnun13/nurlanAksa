@@ -1,10 +1,13 @@
-from fastapi import APIRouter, Header, HTTPException, Query
+from fastapi import APIRouter, Header, HTTPException, Query, Depends
+import logging
 from pydantic import BaseModel
 from ...schemas.exercise import ExerciseResponse
 from ...services import exercise_service
-from ...core.security import decode_access_token
 from ...core.database import get_pool
+from ..dependencies import get_current_user_id
 import datetime
+
+_logger = logging.getLogger(__name__)
 
 router = APIRouter(
     prefix="/exercise",
@@ -24,20 +27,9 @@ _KCAL_PER_MIN: dict[str, int] = {
 }
 
 
-def _get_user_id(authorization: str) -> str:
-    """Authorization: Bearer <token> header'dan user_id çıkar."""
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Token gerekli.")
-    token = authorization.removeprefix("Bearer ").strip()
-    user_id = decode_access_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Geçersiz token.")
-    return user_id
-
-
 @router.get("/summary", response_model=ExerciseResponse)
 async def get_exercise_summary(
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
     difficulty: str = Query(
         default="normal",
         pattern="^(normal|easy)$",
@@ -45,14 +37,13 @@ async def get_exercise_summary(
     ),
 ):
     """
-    Kullanıcının sağlık profiline göre kişiselleştirilmiş egzersiz planını döner.
+    Kullanıcının sağlık profiline göre kişisel leştirilmiş egzersiz planını döner.
 
     - **difficulty=normal** : Standart plan (varsayılan)
     - **difficulty=easy**   : Hafifletilmiş plan (kullanıcı yorgun / wearable verisi kötü)
 
     Token zorunludur — profil veritabanından kullanıcıya özel çekilir.
     """
-    user_id = _get_user_id(authorization)
     data = await exercise_service.get_user_exercise_plan(user_id, difficulty=difficulty)
     return ExerciseResponse(**data)
 
@@ -79,22 +70,40 @@ class CompleteSessionResponse(BaseModel):
 @router.post("/complete-session", response_model=CompleteSessionResponse)
 async def complete_workout_session(
     body: CompleteSessionRequest,
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """
     Kullanıcı antrenmanı tamamladığında veya yarıda bıraktığında çağrılır.
     Kalori, egzersiz tipine göre backend'de hesaplanır (tip bazlı kcal/dk).
     daily_wearable_logs tablosundaki active_minutes ve calories_burned güncellenir.
     """
-    user_id = _get_user_id(authorization)
-    pool    = await get_pool()
-    today   = datetime.date.today()
+    pool  = await get_pool()
+    today = datetime.date.today()
 
     duration_minutes = max(1, body.duration_seconds // 60)
 
-    # Tip bazlı kalori hesabı — frontend kaba tahmininden daha doğru
-    kcal_per_min  = _KCAL_PER_MIN.get(body.exercise_name, 5)
-    computed_kcal = duration_minutes * kcal_per_min
+    # B21: Kullanıcı ağırlığını çek — MET tabanlı kalori hesabı
+    # kcal = MET × kg × saat (standart spor fizyoloji formülü)
+    weight_row = await pool.fetchrow(
+        "SELECT weight_kg FROM health_profiles WHERE user_id = $1 LIMIT 1", user_id
+    )
+    weight_kg = float(weight_row["weight_kg"]) if weight_row and weight_row["weight_kg"] else 70.0
+
+    # MET değerleri (tip başına kcal/dk/kg × 60 yerine MET değeri)
+    _MET_VALUES: dict[str, float] = {
+        "HIIT Kardiyo":        10.0,
+        "Güç Antrenmanı":       6.0,
+        "Bisiklet / Spinning":  7.0,
+        "Yüzme":                8.0,
+        "Kalistenik":           5.0,
+        "Tempolu Yürüyüş":      3.5,
+        "Yoga & Esneme":        2.5,
+        "Aktif Dinlenme":       1.5,
+    }
+    met = _MET_VALUES.get(body.exercise_name, 4.0)
+    # Formul: kcal = MET × kg × (süre / 60)
+    computed_kcal = round(met * weight_kg * (duration_minutes / 60))
+
     # Frontend değeri 0 ise backend değerini, değilse ikisinin büyüğünü al
     final_kcal = max(body.calories_burned, computed_kcal)
 
@@ -121,15 +130,13 @@ async def complete_workout_session(
         new_calories = int(row["calories_burned"]) if row else final_kcal
 
     except Exception as e:
-        import logging, traceback
-        logging.error(f"[Exercise] complete-session DB hatası: {e}\n{traceback.format_exc()}")
-        from fastapi import HTTPException
+        _logger.error("[Exercise] complete-session DB hatası: %s", e, exc_info=True)
         raise HTTPException(status_code=503, detail="Antrenman kaydedilemedi, lütfen tekrar deneyin.")
 
-    status = "tamamlandı" if body.completed else "yarıda bırakıldı"
+    session_status = "tamamlandı" if body.completed else "yarıda bırakıldı"
     return CompleteSessionResponse(
         success=True,
-        message=f"'{body.exercise_name}' antrenmanı {status} ve kaydedildi.",
+        message=f"'{body.exercise_name}' antrenmanı {session_status} ve kaydedildi.",
         total_active_minutes_today=new_minutes,
         total_calories_today=new_calories,
     )

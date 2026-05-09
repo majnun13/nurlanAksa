@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,6 +13,7 @@ from app.api.routes import dashboard as dashboard_router
 from app.api.routes import exercise as exercise_router
 from app.api.routes import nutrition as nutrition_router
 from app.api.routes import wearable as wearable_router
+from app.api.routes import chat as chat_router
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Uygulama başlangıcında bağlantı havuzu oluştur
@@ -30,18 +32,31 @@ app = FastAPI(
 )
 
 # ── CORS ──────────────────────────────────────────────────────
-# Geliştirme aşamasında tüm originlere izin ver
+# GÜVENLIK: allow_origins=["*"] ile allow_credentials=True birlikte KULLANILMAZ.
+# Credentials gerekiyorsa originleri açıkça listele.
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "http://localhost:8000",
+        "http://127.0.0.1:8000",
+        "http://10.0.2.2:8000",   # Android Emülatör
+        "http://localhost:3000",   # Web geliştirme
+    ],
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type", "Accept"],
 )
+_logger = logging.getLogger(__name__)
+
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
-    print(f"OMGGGG VALIDATION ERROR: {exc.errors()}")
-    print(f"BODY WAS: {await request.body()}")
+    # GÜVENLİK: request.body() loglanmaz — şifre/token sızıntısı riski
+    _logger.warning(
+        "[ValidationError] %s %s → %s",
+        request.method,
+        request.url.path,
+        exc.errors(),
+    )
     return JSONResponse(
         status_code=422,
         content={"detail": exc.errors()},
@@ -55,6 +70,7 @@ app.include_router(dashboard_router.router, prefix="/api/v1")
 app.include_router(exercise_router.router, prefix="/api/v1")
 app.include_router(nutrition_router.router, prefix="/api/v1")
 app.include_router(wearable_router.router, prefix="/api/v1")
+app.include_router(chat_router.router, prefix="/api/v1")
 
 
 @app.get("/", tags=["Health"])

@@ -119,11 +119,12 @@ class AuthRepository {
     }
   }
 
-  // ── KODU TEKRAR GÖNDER ────────────────────────────────────
+  // ── KODU TEKRAR GÖNDER ───────────────────────────────────────
+  // B28: email ve userName backend'de kullanılmıyor — sadece userId gerekli
   Future<void> sendVerificationCode({
     required String userId,
-    required String email,    // API'de gerekmiyor ama eski arayüzle uyumluluk için
-    required String userName, // API'de gerekmiyor ama eski arayüzle uyumluluk için
+    String? email,    // Backend'de kullanılmıyor, gerçeye dönük uyumluluk için tutuldu
+    String? userName, // Backend'de kullanılmıyor, gerçeye dönük uyumluluk için tutuldu
   }) async {
     try {
       await _dio.post(

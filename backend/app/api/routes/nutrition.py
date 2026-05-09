@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Header, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, Depends
 from ...schemas.nutrition import (
     NutritionPredictResponse,
     NutritionCalculateRequest,
@@ -10,71 +10,65 @@ from ...schemas.nutrition import (
 from ...services import nutrition_service
 from ...services import nutrition_target_service
 from ...services import nutrition_report_service
-from ...core.security import decode_access_token
 from ...core.database import get_pool
+from ..dependencies import get_current_user_id
 from datetime import date
+import asyncio
 
 router = APIRouter(prefix="/nutrition", tags=["Nutrition"])
 
 
-def _get_user_id(authorization: str) -> str:
-    if not authorization.startswith("Bearer "):
-        raise HTTPException(status_code=401, detail="Token gerekli.")
-    token = authorization.removeprefix("Bearer ").strip()
-    user_id = decode_access_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Geçersiz token.")
-    return user_id
-
+# ─────────────────────────────────────────────────────────────────────────────
+#  Hedefler & Raporlar
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.get("/targets")
-async def get_nutrition_targets(authorization: str = Header(...)):
+async def get_nutrition_targets(user_id: str = Depends(get_current_user_id)):
     """Kişiselleştirilmiş kalori ve makro hedeflerini döner."""
-    user_id = _get_user_id(authorization)
-    targets = await nutrition_target_service.get_user_nutrition_targets(user_id)
-    return targets
+    return await nutrition_target_service.get_user_nutrition_targets(user_id)
 
 
 @router.get("/meals/history")
 async def get_meals_history(
     target_date: str,
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Belirli bir güne ait tüm öğünleri döner. Format: YYYY-MM-DD"""
-    user_id = _get_user_id(authorization)
     try:
         d = date.fromisoformat(target_date)
     except ValueError:
         raise HTTPException(status_code=400, detail="Geçersiz tarih formatı. YYYY-MM-DD kullanın.")
-    meals = await nutrition_report_service.get_meals_by_date(user_id, d)
-    return meals
+    return await nutrition_report_service.get_meals_by_date(user_id, d)
 
 
 @router.get("/report/weekly")
-async def get_weekly_report(authorization: str = Header(...)):
+async def get_weekly_report(user_id: str = Depends(get_current_user_id)):
     """Son 7 günün raporu + ortalamalar + akıllı öneriler."""
-    user_id = _get_user_id(authorization)
     return await nutrition_report_service.get_weekly_report(user_id)
 
 
 @router.get("/report/monthly")
-async def get_monthly_report(authorization: str = Header(...)):
+async def get_monthly_report(user_id: str = Depends(get_current_user_id)):
     """Son 30 günün raporu + ortalamalar + akıllı öneriler."""
-    user_id = _get_user_id(authorization)
     return await nutrition_report_service.get_monthly_report(user_id)
 
+
+# ─────────────────────────────────────────────────────────────────────────────
+#  AI Yemek Tanıma
+# ─────────────────────────────────────────────────────────────────────────────
 
 @router.post("/predict", response_model=NutritionPredictResponse)
 async def predict_food(
     image: UploadFile = File(...),
     gram: float = Form(default=0),
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Fotoğraftan yemek tahmini yap ve (opsiyonel) besin değerlerini hesapla."""
-    _get_user_id(authorization)
-
     image_bytes = await image.read()
-    result = nutrition_service.predict_food(image_bytes)
+    # GÜVENLİK: predict_food senkron (ML model) — event loop'u bloke etmemek için executor kullan
+    # B7: get_running_loop() kullan (get_event_loop deprecate Python 3.10+)
+    loop = asyncio.get_running_loop()
+    result = await loop.run_in_executor(None, nutrition_service.predict_food, image_bytes)
 
     response = NutritionPredictResponse(
         predicted_food=result["predicted_food"],
@@ -97,43 +91,45 @@ async def predict_food(
     return response
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Manuel Hesaplama & Arama
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.post("/calculate", response_model=NutritionCalculateResponse)
 async def calculate_nutrition(
     body: NutritionCalculateRequest,
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Yemek adı ve gram miktarına göre besin değerlerini hesapla."""
-    _get_user_id(authorization)
-
     result = await nutrition_service.get_nutrition_for_food(body.food_name, body.gram)
     if not result:
         raise HTTPException(
             status_code=404,
             detail=f"'{body.food_name}' besin tablosunda bulunamadı.",
         )
-
     return NutritionCalculateResponse(**result)
 
 
 @router.get("/foods", response_model=FoodSearchResponse)
 async def search_foods(
     q: str = "",
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Yemek adına göre arama yap."""
-    _get_user_id(authorization)
-
     foods = await nutrition_service.search_foods(q)
     return FoodSearchResponse(foods=foods)
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+#  Öğün Günlüğü
+# ─────────────────────────────────────────────────────────────────────────────
+
 @router.post("/meals", response_model=MealLogResponse, status_code=201)
 async def log_meal(
     body: MealLogRequest,
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Öğün kaydı oluştur."""
-    user_id = _get_user_id(authorization)
     pool = await get_pool()
 
     row = await pool.fetchrow(
@@ -168,10 +164,9 @@ async def log_meal(
 
 @router.get("/meals", response_model=list[MealLogResponse])
 async def get_meals_today(
-    authorization: str = Header(...),
+    user_id: str = Depends(get_current_user_id),
 ):
     """Bugünkü öğün kayıtlarını getir."""
-    user_id = _get_user_id(authorization)
     pool = await get_pool()
 
     rows = await pool.fetch(

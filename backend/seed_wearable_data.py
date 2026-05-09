@@ -4,8 +4,11 @@ daily_wearable_logs tablosunu oluşturur ve
 """
 import asyncio
 import asyncpg
+import os
+from dotenv import load_dotenv
 
-DB_URL = "postgresql://yavuz@localhost:5432/aksa"
+load_dotenv()
+DB_URL = os.environ.get("DATABASE_URL", "postgresql://yavuz@localhost:5432/aksa")
 
 # Her kullanıcının e-postası ve o günkü wearable verisi
 WEARABLE_DATA = [
