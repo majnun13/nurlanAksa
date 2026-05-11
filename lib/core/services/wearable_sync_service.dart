@@ -22,8 +22,8 @@ class WearableSyncService {
   final Health _health = Health();
   bool _isSyncing = false;
 
-  /// Platforma göre farklı veri türleri kullanılır.
-  /// Android Health Connect ve iOS HealthKit farklı türleri destekler.
+  static bool demoMode = true;
+
   static List<HealthDataType> get _readTypes {
     if (Platform.isAndroid) {
       return [
@@ -70,6 +70,11 @@ class WearableSyncService {
   /// Apple HealthKit'ten veri okumaya çalışır.
   /// iOS'ta izin önce istenir (requestAuthorization), ardından veri çekilir.
   Future<bool> syncNow() async {
+    // Demo modda senkronizasyon atlanır — seed verileri korunur
+    if (demoMode) {
+      debugPrint('[WearableSync] 🎓 Demo modu aktif — sync atlandı');
+      return true;
+    }
     if (_isSyncing) return false;
     _isSyncing = true;
 
@@ -226,12 +231,10 @@ class WearableSyncService {
         debugPrint('[WearableSync] Dinlenme nabzı okuma hatası: $e');
       }
 
-      // 1. Fallback: Apple Watch yoksa, son HEART_RATE ölçümünü resting HR kabul et
-      if (restingHr == null && lastHr != null) {
-        restingHr = lastHr;
-      }
-
-      // 2. Fallback: Eğer hiçbiri yoksa avgHr'den kaba tahmin
+      // Apple Watch veya diğer cihazlar RESTING_HEART_RATE göndermiyorsa, 
+      // anlık son nabzı (lastHr) dinlenme nabzı olarak ALMAMALIYIZ.
+      // Bu yanlış hesaplamalara yol açıyor. Bunun yerine günlük ortalamadan 
+      // bilimsel bir tahmin yapıyoruz (Ortalama nabzın %85'i).
       if (restingHr == null && avgHr != null && avgHr > 0) {
         restingHr = (avgHr * 0.85).round();
       }

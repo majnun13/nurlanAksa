@@ -20,11 +20,11 @@ class ApiClient {
   static String get _baseUrl {
     if (Platform.isAndroid) {
       // Fiziksel cihaz veya emülatör fark etmeksizin aynı Wi-Fi'daki Mac'e bağlanması için
-      return 'http://192.168.1.95:8000';
+      return 'http://172.20.10.12:8000';
     }
     // iOS Simulator için: http://localhost:8000
     // Fiziksel iPhone cihazı için Mac'in yerel IP'sini girdim.
-    return 'http://192.168.1.95:8000';
+    return 'http://172.20.10.12:8000';
   }
 
   static Dio? _dio;

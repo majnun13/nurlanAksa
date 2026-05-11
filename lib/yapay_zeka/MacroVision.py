@@ -6,13 +6,13 @@ from PIL import Image
 from torchvision import transforms
 
 # ====================================================
-# DOSYA YOLLARI (MAC - MASAÜSTÜ)
+# DOSYA YOLLARI (Proje içi – taşınabilir)
 # =====================================================
-DESKTOP = os.path.expanduser("~/Desktop")
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 
-MODEL_PATH = os.path.join(DESKTOP, "combined_best.pth")
-IMAGE_PATH = os.path.join(DESKTOP, "test_resim.jpg")
-CSV_PATH   = os.path.join(DESKTOP, "yemek_besin_tablosu(Besin Tablosu).csv")
+MODEL_PATH = os.path.join(_SCRIPT_DIR, "combined_best.pth")
+IMAGE_PATH = os.path.join(_SCRIPT_DIR, "test_resim.jpg")
+CSV_PATH   = os.path.join(_SCRIPT_DIR, "yemek_besin_tablosu(Besin Tablosu).csv")
 
 # =====================================================
 # CİHAZ
